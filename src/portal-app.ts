@@ -7,6 +7,7 @@ import { normalizeCustomer } from "./master-data.js";
 import { SapODataClient } from "./odata-client.js";
 import { getSellableOffer } from "./portal.js";
 import { assertWriteAllowed, createPayload, PortalCheckoutSchema } from "./sales-orders.js";
+import type { SalesArea } from "./sales-areas.js";
 import type { VerificationDelivery } from "./verification-delivery.js";
 
 export interface PortalDependencies {
@@ -14,7 +15,8 @@ export interface PortalDependencies {
   contact: { get(customer: string): Promise<{ customer: string; email: string }> };
   delivery: VerificationDelivery;
   order?: { config: SapConfig; client: SapODataClient };
-  catalog?: { list(query: CatalogQuery): Promise<CatalogPage> };
+  catalog?: { list(customer: string, salesArea: SalesArea, query: CatalogQuery): Promise<CatalogPage> };
+  salesAreas?: { list(customer: string): Promise<SalesArea[]> };
   customer?: { get(customer: string): Promise<{ customer: string; name: string; accountGroup: string; businessPartner: string }> };
   staticRoot?: string;
   production?: boolean;
@@ -52,6 +54,14 @@ function catalogQuery(req: express.Request): CatalogQuery {
     pageSize: integerQuery(req.query.pageSize, 20, 1, 50),
     sort,
   };
+}
+
+function salesAreaInput(source: Record<string, unknown>): Omit<SalesArea, "key"> {
+  const salesOrganization = typeof source.salesOrganization === "string" ? source.salesOrganization.trim() : "";
+  const distributionChannel = typeof source.distributionChannel === "string" ? source.distributionChannel.trim() : "";
+  const division = typeof source.division === "string" ? source.division.trim() : "";
+  if (!salesOrganization || !distributionChannel || !division) throw new Error("请选择有效的销售范围。");
+  return { salesOrganization, distributionChannel, division };
 }
 
 function optionalText(input: unknown): string | undefined {
@@ -99,6 +109,20 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
   function customerDependencies(): NonNullable<PortalDependencies["customer"]> {
     if (!deps.customer) throw new Error("客户摘要服务尚未配置。");
     return deps.customer;
+  }
+
+  function salesAreaDependencies(): NonNullable<PortalDependencies["salesAreas"]> {
+    if (!deps.salesAreas) throw new Error("客户销售范围服务尚未配置。");
+    return deps.salesAreas;
+  }
+
+  async function selectedSalesArea(customer: string, source: Record<string, unknown>): Promise<SalesArea> {
+    const requested = salesAreaInput(source);
+    const areas = await salesAreaDependencies().list(customer);
+    const area = areas.find((candidate) => candidate.salesOrganization === requested.salesOrganization
+      && candidate.distributionChannel === requested.distributionChannel && candidate.division === requested.division);
+    if (!area) throw new Error("所选销售范围不属于当前客户。");
+    return area;
   }
 
   function respondRouteError(res: express.Response, error: unknown): void {
@@ -150,8 +174,15 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
 
   app.get("/api/catalog", async (req, res) => {
     try {
-      session(req);
-      res.json(await catalogDependencies().list(catalogQuery(req)));
+      const active = session(req);
+      const salesArea = await selectedSalesArea(active.customer, req.query as Record<string, unknown>);
+      res.json(await catalogDependencies().list(active.customer, salesArea, catalogQuery(req)));
+    } catch (error) { respondRouteError(res, error); }
+  });
+
+  app.get("/api/sales-areas", async (req, res) => {
+    try {
+      res.json(await salesAreaDependencies().list(session(req).customer));
     } catch (error) { respondRouteError(res, error); }
   });
 
@@ -164,15 +195,16 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
 
   app.post("/api/orders/preview", async (req, res) => {
     try {
-      session(req);
+      const active = session(req);
       const checkout = checkoutFields(req.body);
+      const salesArea = await selectedSalesArea(active.customer, req.body ?? {});
       const { client, config } = orderDependencies();
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       if (!items.length || items.length > 100) throw new Error("请提供 1 至 100 行订单项目。");
       const priced = await Promise.all(items.map(async (item: { product: string; quantity: number }) => {
         const quantity = Number(item.quantity);
         if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("物料数量必须大于零。");
-        const offer = await getSellableOffer(client, config, String(item.product));
+        const offer = await getSellableOffer(client, config, active.customer, salesArea, String(item.product));
         return { ...offer, productId: String(item.product), quantity, lineTotal: Number(offer.unitPrice) * quantity };
       }));
       res.json({ items: priced, total: priced.reduce((sum, item) => sum + item.lineTotal, 0), checkout });
@@ -182,16 +214,17 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
   app.post("/api/orders/submit", async (req, res) => {
     try {
       const { customer } = session(req);
+      const salesArea = await selectedSalesArea(customer, req.body ?? {});
       const checkout = checkoutFields(req.body);
       const { client, config } = orderDependencies();
       if (req.body?.confirm !== true) throw new Error("请确认订单后再同步 SAP。");
       const preview = await Promise.all((req.body?.items ?? []).map(async (item: { product: string; quantity: number; plant?: string }) => {
-        const offer = await getSellableOffer(client, config, item.product);
+        const offer = await getSellableOffer(client, config, customer, salesArea, item.product);
         return { material: item.product, requested_quantity: Number(item.quantity), requested_quantity_unit: offer.priceUnit || "PC", plant: item.plant };
       }));
       if (!preview.length) throw new Error("订单没有项目。");
       assertWriteAllowed(config, "CREATE_SALES_ORDER", "CREATE_SALES_ORDER");
-      const payload = createPayload({ sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR", sales_organization: process.env.PORTAL_SALES_ORGANIZATION ?? "1000", distribution_channel: process.env.PORTAL_DISTRIBUTION_CHANNEL ?? "10", organization_division: process.env.PORTAL_DIVISION ?? "00", sold_to_party: customer, ...checkout, items: preview, dry_run: false, confirm: "CREATE_SALES_ORDER", response_format: "json" });
+      const payload = createPayload({ sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR", sales_organization: salesArea.salesOrganization, distribution_channel: salesArea.distributionChannel, organization_division: salesArea.division, sold_to_party: customer, ...checkout, items: preview, dry_run: false, confirm: "CREATE_SALES_ORDER", response_format: "json" });
       const created = await client.write<unknown>("post", "/A_SalesOrder", payload);
       res.json({ success: true, salesOrder: created.data });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }

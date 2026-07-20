@@ -25,10 +25,15 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
     auth,
     contact: { get: async (customer: string) => ({ customer: customer.padStart(10, "0"), email: "buyer@example.test" }) },
     delivery: { send: async (_customer: string, sentCode: string) => { code = sentCode; } },
-    catalog: { list: async () => ({
+    salesAreas: { list: async () => [{ salesOrganization: "1000", distributionChannel: "10", division: "00", key: "1000/10/00" }] },
+    catalog: { list: async (customer: string, area: { key: string }) => {
+      assert.equal(customer, "0000100001");
+      assert.equal(area.key, "1000/10/00");
+      return {
       items: [{ product: "000000000000001386", description: "演示物料", productGroup: "FG", baseUnit: "PC", conditionRecord: "0000000123", unitPrice: "30.00", currency: "CNY", priceUnit: "PC" }],
       groups: [{ code: "FG", label: "FG", count: 1 }], page: 1, pageSize: 20, total: 1, pageCount: 1,
-    }) },
+      };
+    } },
     customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
   });
   return { app, getCode: () => code };
@@ -96,7 +101,9 @@ test("keeps authentication feedback outside the hidden order portal", () => {
 
 test("returns a session-protected, paginated catalog and customer summary", async () => {
   const agent = await registeredAgent(makeStorefrontApp);
-  const response = await agent.get("/api/catalog?query=1386&group=FG&page=1&pageSize=20&sort=material").expect(200);
+  const areas = await agent.get("/api/sales-areas").expect(200);
+  assert.equal(areas.body[0].key, "1000/10/00");
+  const response = await agent.get("/api/catalog?salesOrganization=1000&distributionChannel=10&division=00&query=1386&group=FG&page=1&pageSize=20&sort=material").expect(200);
   assert.equal(response.body.items[0].product, "000000000000001386");
   assert.equal(response.body.groups[0].code, "FG");
   assert.equal(response.body.page, 1);
@@ -108,7 +115,8 @@ test("returns a session-protected, paginated catalog and customer summary", asyn
 test("rejects catalog requests without a session and rejects invalid page size", async () => {
   await request(makeStorefrontApp().app).get("/api/catalog?pageSize=20").expect(401);
   const agent = await registeredAgent(makeStorefrontApp);
-  await agent.get("/api/catalog?pageSize=51").expect(400);
+  await agent.get("/api/catalog?salesOrganization=1000&distributionChannel=10&division=00&pageSize=51").expect(400);
+  await agent.get("/api/catalog?salesOrganization=9999&distributionChannel=10&division=00").expect(400);
 });
 
 test("rejects an invalid checkout delivery date before SAP pricing", async () => {
