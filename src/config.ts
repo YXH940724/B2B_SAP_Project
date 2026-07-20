@@ -10,6 +10,11 @@ export interface SapConfig {
   writeEnabled: boolean;
   writeAllowedFields: ReadonlySet<string>;
   httpsAgent: https.Agent;
+  services: {
+    product: string;
+    businessPartner: string;
+    pricing: string;
+  };
 }
 
 const DEFAULT_WRITE_FIELDS = [
@@ -71,5 +76,10 @@ export function loadConfig(): SapConfig {
       ca: caPath ? fs.readFileSync(caPath) : undefined,
       rejectUnauthorized,
     }),
+    services: {
+      product: (process.env.SAP_PRODUCT_SERVICE_URL ?? `${url.origin}/sap/opu/odata/sap/API_PRODUCT_SRV`).replace(/\/+$/, ""),
+      businessPartner: (process.env.SAP_BUSINESS_PARTNER_SERVICE_URL ?? `${url.origin}/sap/opu/odata/sap/API_BUSINESS_PARTNER`).replace(/\/+$/, ""),
+      pricing: (process.env.SAP_PRICING_SERVICE_URL ?? `${url.origin}/sap/opu/odata/sap/API_SLSPRICINGCONDITIONRECORD_SRV`).replace(/\/+$/, ""),
+    },
   };
 }

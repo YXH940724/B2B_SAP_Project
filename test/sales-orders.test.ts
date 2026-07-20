@@ -3,10 +3,12 @@ import test from "node:test";
 import https from "node:https";
 import type { SapConfig } from "../src/config.js";
 import { assertWriteAllowed, createPayload, normalizeSalesOrder, salesOrderPath } from "../src/sales-orders.js";
+import { getCustomer, getProduct } from "../src/master-data.js";
 
 const guardedConfig: SapConfig = {
   baseUrl: "https://sap.example.com/service", client: "200", username: "user", password: "secret", timeoutMs: 30000,
   writeEnabled: false, writeAllowedFields: new Set(["PurchaseOrderByCustomer"]), httpsAgent: new https.Agent(),
+  services: { product: "https://sap.example.com/product", businessPartner: "https://sap.example.com/bp", pricing: "https://sap.example.com/pricing" },
 };
 
 test("normalizes SAP sales order IDs to ten digits", () => {
@@ -32,4 +34,13 @@ test("requires both the write switch and confirmation phrase", () => {
   assert.throws(() => assertWriteAllowed(enabled, undefined, "UPDATE_SALES_ORDER"), /Set confirm/);
   assert.throws(() => assertWriteAllowed(enabled, "UPDATE_SALES_ORDER", "UPDATE_SALES_ORDER", { SoldToParty: "100001" }), /not allowed/);
   assert.doesNotThrow(() => assertWriteAllowed(enabled, "UPDATE_SALES_ORDER", "UPDATE_SALES_ORDER", { PurchaseOrderByCustomer: "PO-1" }));
+});
+
+test("escapes OData key quotes for product and customer reads", async () => {
+  const calls: string[] = [];
+  const client = { getAt: async (_base: string, path: string) => { calls.push(path); return { data: {} }; } };
+  const config = guardedConfig;
+  await getProduct(client as never, config, "A'B");
+  await getCustomer(client as never, config, "C'1");
+  assert.deepEqual(calls, ["/A_Product('A''B')", "/A_Customer('C''1')"]);
 });

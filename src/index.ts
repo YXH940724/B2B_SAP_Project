@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { SapODataClient } from "./odata-client.js";
+import { getCustomer, getProduct, listSalesPriceConditions } from "./master-data.js";
 import { CreateSalesOrderSchema, ResponseFormat, SalesOrderId, UpdateSalesOrderSchema, assertWriteAllowed, createPayload, getSalesOrder, getSalesOrderItems, normalizeSalesOrder, salesOrderPath } from "./sales-orders.js";
 
 const config = loadConfig();
@@ -32,6 +33,33 @@ server.registerTool("sap_get_sales_order", {
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 }, async ({ sales_order, response_format }) => {
   try { return result(await getSalesOrder(client, sales_order), response_format); } catch (error) { return failure(error); }
+});
+
+server.registerTool("sap_get_product", {
+  title: "Get SAP product master",
+  description: "Read one SAP product master record from API_PRODUCT_SRV.",
+  inputSchema: { product: z.string().min(1).max(40), response_format: ResponseFormat },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+}, async ({ product, response_format }) => {
+  try { return result({ product: await getProduct(client, config, product) }, response_format); } catch (error) { return failure(error); }
+});
+
+server.registerTool("sap_get_customer", {
+  title: "Get SAP customer master",
+  description: "Read one SAP customer master record from API_BUSINESS_PARTNER.",
+  inputSchema: { customer: z.string().min(1).max(10), response_format: ResponseFormat },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+}, async ({ customer, response_format }) => {
+  try { return result({ customer: await getCustomer(client, config, customer) }, response_format); } catch (error) { return failure(error); }
+});
+
+server.registerTool("sap_list_sales_price_conditions", {
+  title: "List SAP sales price conditions",
+  description: "Read a paged list of sales pricing-condition records. Optionally filter by condition type.",
+  inputSchema: { condition_type: z.string().min(1).max(4).optional(), limit: z.number().int().min(1).max(100).default(20), offset: z.number().int().min(0).default(0), response_format: ResponseFormat },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+}, async ({ condition_type, limit, offset, response_format }) => {
+  try { return result({ conditions: await listSalesPriceConditions(client, config, limit, offset, condition_type), limit, offset }, response_format); } catch (error) { return failure(error); }
 });
 
 server.registerTool("sap_get_sales_order_items", {

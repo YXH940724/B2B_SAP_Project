@@ -1,6 +1,6 @@
 # SAP OData MCP Server
 
-面向 SAP S/4HANA `API_SALES_ORDER_SRV` 的 stdio MCP 服务，支持销售订单查询、行项目查询、创建和受控更新。
+面向 SAP S/4HANA OData 的 stdio MCP 服务，支持销售订单、物料主数据、客户主数据、销售价格条件的查询，以及受控的销售订单创建和更新。
 
 ## 安全模型
 
@@ -33,6 +33,9 @@ npm start
 | `sap_get_sales_order_items` | 分页上限内查询订单行项目 |
 | `sap_create_sales_order` | 生成或创建销售订单；默认演练模式 |
 | `sap_update_sales_order` | 更新白名单内的表头字段；默认演练模式 |
+| `sap_get_product` | 查询 `API_PRODUCT_SRV` 的物料主数据 |
+| `sap_get_customer` | 查询 `API_BUSINESS_PARTNER` 的客户主数据 |
+| `sap_list_sales_price_conditions` | 分页查询 `API_SLSPRICINGCONDITIONRECORD_SRV` 的销售价格条件 |
 
 真实创建须使用 `confirm: "CREATE_SALES_ORDER"`，真实更新须使用 `confirm: "UPDATE_SALES_ORDER"`。创建和更新前请先取得业务变更审批。
 

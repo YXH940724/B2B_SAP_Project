@@ -31,8 +31,12 @@ export class SapODataClient {
   }
 
   async get<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<ODataResponse<T>> {
+    return this.getAt<T>(this.config.baseUrl, path, params);
+  }
+
+  async getAt<T>(baseUrl: string, path: string, params: Record<string, string | number | undefined> = {}): Promise<ODataResponse<T>> {
     try {
-      const response = await this.http.get<ODataEnvelope<T>>(path, { params: { "sap-client": this.config.client, ...params } });
+      const response = await this.http.get<ODataEnvelope<T>>(`${baseUrl.replace(/\/+$/, "")}${path}`, { params: { "sap-client": this.config.client, ...params } });
       return { data: response.data.d ?? (response.data as T), etag: response.headers.etag as string | undefined };
     } catch (error) {
       throw toSapError(error);
