@@ -1,66 +1,41 @@
-# SAP HANA MCP 本地部署
+# SAP OData MCP Server
 
-本项目将 [`hana-mcp-server`](https://www.npmjs.com/package/hana-mcp-server) 固定为可复现的本地 MCP 运行时。服务以 stdio 方式运行，由 Codex、Claude Desktop、VS Code 等 MCP 客户端启动；它不会监听本机网络端口。
+面向 SAP S/4HANA `API_SALES_ORDER_SRV` 的 stdio MCP 服务，支持销售订单查询、行项目查询、创建和受控更新。
 
-## 前置条件
+## 安全模型
 
-- Node.js 18 或更高版本
-- 能从运行 MCP 的电脑访问 SAP HANA SQL 服务（公司网络或 VPN）
-- HANA 数据库地址、SQL 端口、只读数据库账号和密码
+- 所有写操作默认 `dry_run=true`，只返回将发送的 OData 负载。
+- 真实写入必须同时满足：`SAP_WRITE_ENABLED=true`、`dry_run=false`，以及工具要求的确认短语。
+- 更新要求传入 `sap_get_sales_order` 返回的 ETag，以避免覆盖并发修改。
+- 可更新字段由 `SAP_WRITE_ALLOWED_FIELDS` 白名单控制。
+- 必须通过 `SAP_CA_CERT_PATH` 信任企业 CA。生产环境拒绝关闭 TLS 证书校验。
+- 密码和证书不允许写入 Git 仓库。
 
-> `44350` 是一个 HTTPS 端口，并不必然是 HANA SQL 端口。请先与 HANA 管理员确认可由 SAP HANA Node.js 客户端连接的 SQL 端口；MDC 租户数据库通常使用 `3NN13`。
-
-## 安装
+## 安装与构建
 
 ```bash
 npm install
+npm run build
 ```
 
-该命令安装锁定在 `package-lock.json` 中的 `hana-mcp-server`。也可以让 MCP 客户端直接执行 `npx -y hana-mcp-server@0.3.2`，无需全局安装。
-
-## 配置 MCP 客户端
-
-复制 [mcp.config.example.json](mcp.config.example.json) 的 `hana` 条目到 MCP 客户端配置中，填入本机的连接信息。不要将真实密码写入本仓库、提交到 Git，或发到聊天中。
-
-本项目默认限制为只读：`INSERT`、`UPDATE`、`DELETE` 和 `TRUNCATE` 均保持禁用；结果集也默认限制为每页 50 行，以降低误操作与上下文泄露风险。
-
-对于 MCP 客户端使用环境变量的场景，可复制 `.env.example` 到受保护的本机位置并设置权限：
+将 `.env.example` 的值保存到仓库外的受保护位置。服务通过 MCP 客户端的 `env` 块接收这些环境变量；参考 [mcp.config.example.json](mcp.config.example.json)。
 
 ```bash
-cp .env.example ~/.config/sap-hana-mcp/.env
-chmod 600 ~/.config/sap-hana-mcp/.env
-```
-
-`.env` 仅用于保存本机环境变量，具体如何注入到客户端取决于所使用的 MCP 客户端；不要将它放回项目目录。
-
-## 离线校验
-
-在不连接数据库的情况下校验运行环境变量：
-
-```bash
-HANA_HOST=hana.example.com \
-HANA_PORT=31013 \
-HANA_USER=readonly_user \
-HANA_PASSWORD=replace-locally \
 npm run check-config
+npm start
 ```
 
-当校验通过后，在 MCP 客户端中重新连接服务，再运行 `hana_test_connection` 完成实际连通性验证。该工具会屏蔽密码；请仅使用最小权限的数据库账号。
+## 工具
 
-## 常用连接字段
-
-| 字段 | 说明 |
+| 工具 | 能力 |
 | --- | --- |
-| `HANA_HOST` | HANA 数据库主机名或 IP，不含 `https://` |
-| `HANA_PORT` | HANA SQL 端口，须由管理员确认 |
-| `HANA_USER` / `HANA_PASSWORD` | 最小权限的数据库凭据 |
-| `HANA_SCHEMA` | 可选的默认 Schema |
-| `HANA_INSTANCE_NUMBER` / `HANA_DATABASE_NAME` | 仅 MDC 系统库或租户库需要 |
-| `HANA_SSL` / `HANA_ENCRYPT` | TLS SQL 端口通常保持 `true` |
+| `sap_get_sales_order` | 查询订单表头并返回 ETag |
+| `sap_get_sales_order_items` | 分页上限内查询订单行项目 |
+| `sap_create_sales_order` | 生成或创建销售订单；默认演练模式 |
+| `sap_update_sales_order` | 更新白名单内的表头字段；默认演练模式 |
 
-## 安全边界
+真实创建须使用 `confirm: "CREATE_SALES_ORDER"`，真实更新须使用 `confirm: "UPDATE_SALES_ORDER"`。创建和更新前请先取得业务变更审批。
 
-- 不要将密码、证书或 `.env` 纳入版本控制。
-- 生产环境使用最小权限的只读数据库用户。
-- 保持 `HANA_ALLOW_INSERT`、`HANA_ALLOW_UPDATE`、`HANA_ALLOW_DELETE` 为 `false`；若未来需要写操作，应另行完成权限评审。
-- 将 `HANA_VALIDATE_CERT=false` 限制在自签名测试环境，生产环境应校验证书。
+## CCFB / Codex 接入
+
+由机器人宿主管理员将构建后的 `dist/index.js` 注册为 stdio MCP，使用 [mcp.config.example.json](mcp.config.example.json) 的结构注入密钥。重启机器人并新开对话后，MCP 工具才会可用。

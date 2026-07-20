@@ -1,26 +1,16 @@
 {
   "mcpServers": {
-    "hana": {
+    "sap-odata": {
       "type": "stdio",
-      "timeout": 600,
-      "command": "npx",
-      "args": ["-y", "hana-mcp-server@0.3.2"],
+      "command": "node",
+      "args": ["/absolute/path/to/sap-odata-mcp-server/dist/index.js"],
       "env": {
-        "HANA_HOST": "hana.example.com",
-        "HANA_PORT": "31013",
-        "HANA_USER": "readonly_user",
-        "HANA_PASSWORD": "set-this-only-in-local-client-config",
-        "HANA_SSL": "true",
-        "HANA_ENCRYPT": "true",
-        "HANA_VALIDATE_CERT": "true",
-        "HANA_QUERY_LIMITS_ENABLED": "true",
-        "HANA_MAX_RESULT_ROWS": "50",
-        "HANA_QUERY_TIMEOUT_MS": "30000",
-        "HANA_ALLOW_INSERT": "false",
-        "HANA_ALLOW_UPDATE": "false",
-        "HANA_ALLOW_DELETE": "false",
-        "ENABLE_FILE_LOGGING": "false",
-        "ENABLE_CONSOLE_LOGGING": "false"
+        "SAP_ODATA_BASE_URL": "https://sap.example.com/sap/opu/odata/sap/API_SALES_ORDER_SRV",
+        "SAP_CLIENT": "200",
+        "SAP_USER": "service_user",
+        "SAP_PASSWORD": "set-this-only-in-local-client-config",
+        "SAP_TLS_REJECT_UNAUTHORIZED": "true",
+        "SAP_WRITE_ENABLED": "false"
       }
     }
   }
