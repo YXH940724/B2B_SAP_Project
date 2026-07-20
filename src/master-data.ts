@@ -1,7 +1,7 @@
 import type { SapConfig } from "./config.js";
 import { SapODataClient } from "./odata-client.js";
 
-function odataKey(value: string): string {
+export function odataKey(value: string): string {
   return value.replace(/'/g, "''");
 }
 
