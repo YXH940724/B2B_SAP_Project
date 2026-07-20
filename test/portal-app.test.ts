@@ -118,3 +118,21 @@ test("rejects an invalid checkout delivery date before SAP pricing", async () =>
   }).expect(400);
   assert.match(response.body.error, /期望交货日期/);
 });
+
+test("serves the storefront navigation, catalog controls, cart and checkout fields", () => {
+  const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  assert.match(html, /id="catalog-search"/);
+  assert.match(html, /id="material-groups"/);
+  assert.match(html, /id="catalog-grid"/);
+  assert.match(html, /id="catalog-pagination"/);
+  assert.match(html, /id="cart-items"/);
+  assert.match(html, /id="requested-delivery-date"/);
+  assert.match(html, /id="purchase-order-by-customer"/);
+  assert.match(html, /id="portal-note"/);
+});
+
+test("keeps storefront informational feedback separate from authentication error styling", () => {
+  const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/styles.css"), "utf8");
+  assert.match(styles, /#auth-message\{[^}]*color:#b42318/);
+  assert.doesNotMatch(styles, /#auth-message,#portal-message\{[^}]*color:#b42318/);
+});

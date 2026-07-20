@@ -1,13 +1,280 @@
-const cart=[];const $=id=>document.getElementById(id);const authNote=t=>$("auth-message").textContent=t;const portalNote=t=>$("portal-message").textContent=t;
-function showAuth(panel){["login-panel","register-request-panel","register-verify-panel"].forEach(id=>$(id).hidden=id!==panel);authNote("")}
-function setBusy(button,busy,text){if(!button.dataset.label)button.dataset.label=button.textContent;button.disabled=busy;button.textContent=busy?text:button.dataset.label}
-async function api(url,options){const r=await fetch(url,options);const d=await r.json();if(!r.ok)throw Error(d.error||"请求失败");return d}
-function render(){const total=cart.reduce((s,x)=>s+x.quantity*Number(x.unitPrice),0);$("cart").innerHTML=cart.map((x,i)=>`<tr><td>${x.productId}</td><td>${x.unitPrice} ${x.currency}/${x.priceUnit}</td><td>${x.quantity}</td><td>${(x.quantity*Number(x.unitPrice)).toFixed(2)}</td><td><button data-i="${i}">删除</button></td></tr>`).join("");$("total").textContent=`合计：${total.toFixed(2)}`;$("submit").disabled=!cart.length}
-$("show-register").onclick=()=>showAuth("register-request-panel");document.querySelectorAll(".back-to-login").forEach(button=>button.onclick=()=>showAuth("login-panel"));
-$("login-form").onsubmit=async e=>{e.preventDefault();const button=$("login-button");setBusy(button,true,"登录中…");try{const d=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({customer:$("customer").value,password:$("password").value})});$("auth").hidden=true;$("portal").hidden=false;$("customer-info").textContent=`客户：${d.customer}`;portalNote("登录成功")}catch(e){authNote(e.message)}finally{setBusy(button,false,"登录中…")}};
-$("register-request-form").onsubmit=async e=>{e.preventDefault();const button=$("request-code-button"),customer=$("register-customer").value;setBusy(button,true,"发送中…");try{const d=await api("/api/register/request-code",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({customer})});$("verify-customer").value=customer;showAuth("register-verify-panel");authNote(d.message)}catch(e){authNote(e.message)}finally{setBusy(button,false,"发送中…")}};
-$("register-verify-form").onsubmit=async e=>{e.preventDefault();const button=$("verify-button");setBusy(button,true,"注册中…");try{const d=await api("/api/register/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({customer:$("verify-customer").value,code:$("verification-code").value,password:$("register-password").value})});$("customer").value=$("verify-customer").value;$("password").value="";showAuth("login-panel");authNote(d.message)}catch(e){authNote(e.message)}finally{setBusy(button,false,"注册中…")}};
-$("product-form").onsubmit=async e=>{e.preventDefault();try{const productId=$("product").value,quantity=Number($("quantity").value),o=await api(`/api/catalog/${encodeURIComponent(productId)}`);cart.push({...o,productId,quantity});render();portalNote("已加入购物车")}catch(e){portalNote(e.message)}};
-$("cart").onclick=e=>{if(e.target.dataset.i!==undefined){cart.splice(Number(e.target.dataset.i),1);render()}};
-$("submit").onclick=async()=>{if(!confirm("确认创建销售订单并同步到 SAP？"))return;try{const d=await api("/api/orders/submit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm:true,items:cart.map(x=>({product:x.productId,quantity:x.quantity}))})});portalNote(`SAP 订单创建成功：${d.salesOrder.SalesOrder||"请查看返回信息"}`);cart.length=0;render()}catch(e){portalNote(e.message)}};
-$("logout").onclick=async()=>{await fetch("/api/logout",{method:"POST"});cart.length=0;render();$("portal").hidden=true;$("auth").hidden=false;showAuth("login-panel")};render();
+const $ = (id) => document.getElementById(id);
+const cart = [];
+const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material" };
+let lastPreview = null;
+
+const authNote = (text) => { $("auth-message").textContent = text; };
+const portalNote = (text) => { $("portal-message").textContent = text; };
+
+function setBusy(button, busy, text) {
+  if (!button.dataset.label) button.dataset.label = button.textContent;
+  button.disabled = busy;
+  button.textContent = busy ? text : button.dataset.label;
+}
+
+async function api(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "请求失败");
+  return data;
+}
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function showAuth(panel) {
+  ["login-panel", "register-request-panel", "register-verify-panel"].forEach((id) => { $(id).hidden = id !== panel; });
+  authNote("");
+}
+
+function groupClass(group) {
+  const palette = ["blue", "green", "gold", "purple", "teal"];
+  const value = [...group].reduce((total, char) => total + char.codePointAt(0), 0);
+  return palette[value % palette.length];
+}
+
+function cartTotal() {
+  return cart.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity, 0);
+}
+
+function renderCustomer(profile) {
+  const panel = $("customer-summary");
+  panel.replaceChildren();
+  panel.append(element("p", "eyebrow", "客户信息"));
+  panel.append(element("h2", "customer-name", profile.name));
+  const fields = [["客户号", profile.customer], ["账户组", profile.accountGroup || "—"], ["业务伙伴", profile.businessPartner]];
+  fields.forEach(([label, value]) => {
+    const row = element("p", "customer-field");
+    row.append(element("span", "", label), element("strong", "", value));
+    panel.append(row);
+  });
+  panel.append(element("hr"));
+  panel.append(element("p", "eyebrow", "订购规则"));
+  panel.append(element("p", "sidebar-note", "仅展示 A305 / ZR01 当前有效价格物料。"));
+}
+
+function renderGroups(groups) {
+  const host = $("material-groups");
+  host.replaceChildren();
+  const all = element("button", `group-button${catalogState.group ? "" : " active"}`, "全部有效物料");
+  all.type = "button";
+  all.addEventListener("click", () => loadCatalog({ group: "", page: 1 }));
+  host.append(all);
+  groups.forEach((group) => {
+    const button = element("button", `group-button${catalogState.group === group.code ? " active" : ""}`);
+    button.type = "button";
+    button.append(element("span", "", group.label), element("small", "", String(group.count)));
+    button.addEventListener("click", () => loadCatalog({ group: group.code, page: 1 }));
+    host.append(button);
+  });
+}
+
+function addToCart(item) {
+  const existing = cart.find((line) => line.product === item.product);
+  if (existing) existing.quantity += 1;
+  else cart.push({ ...item, quantity: 1 });
+  renderCart();
+  portalNote(`${item.product} 已加入购物车。`);
+}
+
+function renderCatalog(items) {
+  const host = $("catalog-grid");
+  host.replaceChildren();
+  if (!items.length) {
+    host.append(element("p", "empty-state", "未找到符合条件的有效价格物料。"));
+    return;
+  }
+  items.forEach((item) => {
+    const card = element("article", "product-card");
+    const hero = element("div", `product-hero ${groupClass(item.productGroup)}`);
+    hero.append(element("span", "product-group", item.productGroup === "UNCLASSIFIED" ? "未分类" : item.productGroup), element("strong", "material-number", item.product.replace(/^0+/, "") || item.product));
+    const body = element("div", "product-body");
+    body.append(element("h3", "product-description", item.description));
+    body.append(element("p", "product-unit", `销售单位：${item.baseUnit || item.priceUnit || "—"}`));
+    body.append(element("p", "product-price", `${item.currency || ""} ${Number(item.unitPrice).toFixed(2)} / ${item.priceUnit || item.baseUnit || "—"}`.trim()));
+    const button = element("button", "add-cart", "加入购物车");
+    button.type = "button";
+    button.addEventListener("click", () => addToCart(item));
+    body.append(button);
+    card.append(hero, body);
+    host.append(card);
+  });
+}
+
+function renderPagination(data) {
+  const host = $("catalog-pagination");
+  host.replaceChildren();
+  if (!data.total) return;
+  const previous = element("button", "pagination-button", "上一页");
+  previous.type = "button";
+  previous.disabled = data.page <= 1;
+  previous.addEventListener("click", () => loadCatalog({ page: data.page - 1 }));
+  const next = element("button", "pagination-button", "下一页");
+  next.type = "button";
+  next.disabled = data.page >= data.pageCount;
+  next.addEventListener("click", () => loadCatalog({ page: data.page + 1 }));
+  host.append(previous, element("span", "page-summary", `第 ${data.page} / ${data.pageCount || 1} 页，共 ${data.total} 件`), next);
+}
+
+function renderCart() {
+  const host = $("cart-items");
+  host.replaceChildren();
+  const quantity = cart.reduce((sum, item) => sum + item.quantity, 0);
+  $("cart-count").textContent = String(quantity);
+  if (!cart.length) host.append(element("p", "empty-cart", "购物车为空，选择商品后可在这里调整数量。"));
+  cart.forEach((item) => {
+    const row = element("article", "cart-line");
+    row.append(element("strong", "", item.product.replace(/^0+/, "") || item.product), element("p", "cart-description", item.description), element("p", "cart-price", `${item.currency || ""} ${Number(item.unitPrice).toFixed(2)} / ${item.priceUnit || item.baseUnit || "—"}`.trim()));
+    const controls = element("div", "quantity-controls");
+    const decrement = element("button", "icon-button", "−");
+    decrement.type = "button";
+    decrement.setAttribute("aria-label", `减少 ${item.product} 数量`);
+    decrement.disabled = item.quantity <= 1;
+    decrement.addEventListener("click", () => { item.quantity -= 1; renderCart(); });
+    const count = element("span", "", String(item.quantity));
+    const increment = element("button", "icon-button", "+");
+    increment.type = "button";
+    increment.setAttribute("aria-label", `增加 ${item.product} 数量`);
+    increment.addEventListener("click", () => { item.quantity += 1; renderCart(); });
+    const remove = element("button", "remove-line", "删除");
+    remove.type = "button";
+    remove.addEventListener("click", () => { cart.splice(cart.indexOf(item), 1); renderCart(); });
+    controls.append(decrement, count, increment, remove);
+    row.append(controls);
+    host.append(row);
+  });
+  $("cart-total").textContent = `合计 ${cart[0]?.currency || "¥"}${cartTotal().toFixed(2)}`;
+  $("checkout-button").disabled = !cart.length;
+}
+
+async function loadCatalog(next = {}) {
+  Object.assign(catalogState, next);
+  const params = new URLSearchParams({ page: String(catalogState.page), pageSize: String(catalogState.pageSize), sort: catalogState.sort });
+  if (catalogState.query) params.set("query", catalogState.query);
+  if (catalogState.group) params.set("group", catalogState.group);
+  portalNote("正在加载商品目录…");
+  try {
+    const data = await api(`/api/catalog?${params}`);
+    Object.assign(catalogState, { page: data.page, pageSize: data.pageSize });
+    renderGroups(data.groups);
+    renderCatalog(data.items);
+    renderPagination(data);
+    $("catalog-count").textContent = `共 ${data.total} 件当前有效价格物料`;
+    portalNote("");
+  } catch (error) { portalNote(error.message); }
+}
+
+async function openCheckout() {
+  if (!cart.length) return;
+  $("checkout").hidden = false;
+  $("checkout").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function checkoutPayload() {
+  return {
+    items: cart.map((item) => ({ product: item.product, quantity: item.quantity })),
+    requestedDeliveryDate: $("requested-delivery-date").value,
+    purchaseOrderByCustomer: $("purchase-order-by-customer").value,
+    note: $("portal-note").value,
+  };
+}
+
+function renderPreview(preview) {
+  const host = $("order-confirmation-summary");
+  host.replaceChildren();
+  preview.items.forEach((item) => host.append(element("p", "", `${item.productId} × ${item.quantity}　${item.currency || ""} ${Number(item.lineTotal).toFixed(2)}`)));
+  host.append(element("p", "order-total", `订单合计 ${preview.items[0]?.currency || "¥"}${Number(preview.total).toFixed(2)}`));
+  if (preview.checkout.requested_delivery_date) host.append(element("p", "", `期望交货日期：${preview.checkout.requested_delivery_date}`));
+  if (preview.checkout.purchase_order_by_customer) host.append(element("p", "", `客户采购订单号：${preview.checkout.purchase_order_by_customer}`));
+  if (preview.checkout.portal_note) host.append(element("p", "", "订单备注已记录。"));
+}
+
+$("show-register").addEventListener("click", () => showAuth("register-request-panel"));
+document.querySelectorAll(".back-to-login").forEach((button) => button.addEventListener("click", () => showAuth("login-panel")));
+
+$("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("login-button");
+  setBusy(button, true, "登录中…");
+  try {
+    await api("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer: $("customer").value, password: $("password").value }) });
+    const profile = await api("/api/me");
+    $("auth").hidden = true;
+    $("portal").hidden = false;
+    renderCustomer(profile);
+    await loadCatalog();
+  } catch (error) { authNote(error.message); } finally { setBusy(button, false, "登录中…"); }
+});
+
+$("register-request-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("request-code-button");
+  const customer = $("register-customer").value;
+  setBusy(button, true, "发送中…");
+  try {
+    const data = await api("/api/register/request-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer }) });
+    $("verify-customer").value = customer;
+    showAuth("register-verify-panel");
+    authNote(data.message);
+  } catch (error) { authNote(error.message); } finally { setBusy(button, false, "发送中…"); }
+});
+
+$("register-verify-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("verify-button");
+  setBusy(button, true, "注册中…");
+  try {
+    const data = await api("/api/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer: $("verify-customer").value, code: $("verification-code").value, password: $("register-password").value }) });
+    $("customer").value = $("verify-customer").value;
+    $("password").value = "";
+    showAuth("login-panel");
+    authNote(data.message);
+  } catch (error) { authNote(error.message); } finally { setBusy(button, false, "注册中…"); }
+});
+
+$("catalog-search-form").addEventListener("submit", (event) => { event.preventDefault(); loadCatalog({ query: $("catalog-search").value.trim(), page: 1 }); });
+$("catalog-sort").addEventListener("change", () => loadCatalog({ sort: $("catalog-sort").value, page: 1 }));
+$("checkout-button").addEventListener("click", openCheckout);
+$("back-to-cart-button").addEventListener("click", () => { $("checkout").hidden = true; $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
+
+$("checkout-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    lastPreview = await api("/api/orders/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(checkoutPayload()) });
+    renderPreview(lastPreview);
+    $("order-confirmation-dialog").showModal();
+  } catch (error) { portalNote(error.message); }
+});
+
+$("cancel-order-button").addEventListener("click", () => $("order-confirmation-dialog").close());
+$("confirm-order-button").addEventListener("click", async () => {
+  if (!lastPreview) return;
+  const button = $("confirm-order-button");
+  setBusy(button, true, "同步中…");
+  try {
+    const data = await api("/api/orders/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...checkoutPayload(), confirm: true }) });
+    $("order-confirmation-dialog").close();
+    portalNote(`SAP 订单创建成功：${data.salesOrder?.SalesOrder || "请查看 SAP 返回信息"}`);
+    cart.length = 0;
+    lastPreview = null;
+    $("checkout").hidden = true;
+    renderCart();
+  } catch (error) { portalNote(error.message); } finally { setBusy(button, false, "同步中…"); }
+});
+
+$("logout").addEventListener("click", async () => {
+  await fetch("/api/logout", { method: "POST" });
+  cart.length = 0;
+  lastPreview = null;
+  renderCart();
+  $("checkout").hidden = true;
+  $("portal").hidden = true;
+  $("auth").hidden = false;
+  showAuth("login-panel");
+});
+
+renderCart();
