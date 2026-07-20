@@ -24,6 +24,15 @@ const config: SapConfig = {
 function makeClient() {
   return {
     getAt: async (_base: string, path: string, params?: Record<string, string | number | undefined>) => {
+      if (path === "/A_SlsPrcgConditionRecord") {
+        if (params?.["$skip"] === 200) return { data: { results: [] } };
+        return { data: { results: [
+          { ConditionRecord: "0000000123", ConditionTable: "305", ConditionRateValue: "30.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "PC", ConditionIsDeleted: false },
+          { ConditionRecord: "0000000124", ConditionTable: "305", ConditionRateValue: "12.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "EA", ConditionIsDeleted: false },
+          { ConditionRecord: "0000000125", ConditionTable: "305", ConditionRateValue: "1.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "EA", ConditionIsDeleted: false },
+          { ConditionRecord: "0000000126", ConditionTable: "304", ConditionRateValue: "1.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "EA", ConditionIsDeleted: false },
+        ] } };
+      }
       if (path === "/A_SlsPrcgCndnRecdValidity") {
         if (params?.["$skip"] === 200) return { data: { results: [] } };
         return {
@@ -37,7 +46,6 @@ function makeClient() {
                 ConditionRecord: "0000000123",
                 ConditionValidityStartDate: "/Date(1782777600000)/",
                 ConditionValidityEndDate: "/Date(1790812800000)/",
-                to_SlsPrcgConditionRecord: { ConditionTable: "305", ConditionRateValue: "30.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "PC", ConditionIsDeleted: false },
               },
               {
                 Material: "000000000000001387",
@@ -47,7 +55,6 @@ function makeClient() {
                 ConditionRecord: "0000000124",
                 ConditionValidityStartDate: "/Date(1782777600000)/",
                 ConditionValidityEndDate: "/Date(1790812800000)/",
-                to_SlsPrcgConditionRecord: { ConditionTable: "305", ConditionRateValue: "12.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "EA", ConditionIsDeleted: false },
               },
               {
                 Material: "000000000000001390",
@@ -77,7 +84,6 @@ function makeClient() {
                 ConditionRecord: "0000000125",
                 ConditionValidityStartDate: "/Date(1719792000000)/",
                 ConditionValidityEndDate: "/Date(1751328000000)/",
-                to_SlsPrcgConditionRecord: { ConditionTable: "305", ConditionRateValue: "1.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "EA", ConditionIsDeleted: false },
               },
               {
                 Material: "000000000000001389",
@@ -87,7 +93,6 @@ function makeClient() {
                 ConditionRecord: "0000000126",
                 ConditionValidityStartDate: "/Date(1782777600000)/",
                 ConditionValidityEndDate: "/Date(1790812800000)/",
-                to_SlsPrcgConditionRecord: { ConditionTable: "304", ConditionRateValue: "1.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "EA", ConditionIsDeleted: false },
               },
             ],
           },
@@ -153,4 +158,32 @@ test("keeps only prices matching the customer and selected sales area", async ()
   assert.match(String(requests[0]?.["$filter"]), /SalesOrganization eq '1000'/);
   assert.match(String(requests[0]?.["$filter"]), /DistributionChannel eq '10'/);
   assert.deepEqual(page.items.map((item) => item.product), ["000000000000001386", "000000000000001387"]);
+});
+
+test("loads A305 condition records before looking up their scoped price validities", async () => {
+  const calls: Array<{ path: string; params?: Record<string, string | number | undefined> }> = [];
+  const client = {
+    getAt: async (_service: string, path: string, params?: Record<string, string | number | undefined>) => {
+      calls.push({ path, params });
+      if (path === "/A_SlsPrcgConditionRecord") {
+        return { data: { results: [{ ConditionRecord: "0000000123", ConditionTable: "305", ConditionRateValue: "30.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "PC", ConditionIsDeleted: false }] } };
+      }
+      if (path === "/A_SlsPrcgCndnRecdValidity") {
+        return { data: { results: [{ Material: "000000000000001386", Customer: "0000100001", SalesOrganization: "1000", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
+      }
+      if (path === "/A_Product('000000000000001386')") {
+        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+      }
+      throw new Error(`Unexpected request ${path}`);
+    },
+  };
+  const catalog = new CatalogService(client as never, config, () => new Date("2026-07-20T00:00:00Z"));
+
+  const page = await catalog.list("100001", salesArea, { page: 1, pageSize: 20, sort: "material" });
+
+  assert.equal(calls[0]?.path, "/A_SlsPrcgConditionRecord");
+  assert.match(String(calls[0]?.params?.["$filter"]), /ConditionTable eq '305'/);
+  assert.match(String(calls[0]?.params?.["$filter"]), /ConditionType eq 'ZR01'/);
+  assert.equal(calls[1]?.path, "/A_SlsPrcgCndnRecdValidity");
+  assert.deepEqual(page.items.map((item) => item.product), ["000000000000001386"]);
 });

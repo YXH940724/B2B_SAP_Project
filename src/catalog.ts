@@ -13,13 +13,15 @@ export interface PriceValidity {
   ConditionRecord?: string;
   ConditionValidityStartDate?: string;
   ConditionValidityEndDate?: string;
-  to_SlsPrcgConditionRecord?: {
-    ConditionTable?: string;
-    ConditionRateValue?: string;
-    ConditionRateValueUnit?: string;
-    ConditionQuantityUnit?: string;
-    ConditionIsDeleted?: boolean | string;
-  };
+}
+
+interface PriceConditionRecord {
+  ConditionRecord?: string;
+  ConditionTable?: string;
+  ConditionRateValue?: string;
+  ConditionRateValueUnit?: string;
+  ConditionQuantityUnit?: string;
+  ConditionIsDeleted?: boolean | string;
 }
 
 export interface CatalogItem {
@@ -71,8 +73,7 @@ function isDeleted(value: boolean | string | undefined): boolean {
   return value === true || value === "true" || value === "X";
 }
 
-export function currentA305Price(row: PriceValidity, now: Date): CurrentPrice | undefined {
-  const header = row.to_SlsPrcgConditionRecord;
+export function currentA305Price(row: PriceValidity, header: PriceConditionRecord | undefined, now: Date): CurrentPrice | undefined {
   const unitPrice = Number(header?.ConditionRateValue);
   const from = sapDate(row.ConditionValidityStartDate);
   const to = sapDate(row.ConditionValidityEndDate);
@@ -135,12 +136,12 @@ export class CatalogService {
 
   async getOffer(customerInput: string, salesArea: SalesArea, product: string): Promise<CatalogItem> {
     const customer = normalizeCustomer(customerInput);
+    const records = await this.listA305Records();
     const response = await this.client.getAt<ODataResults<PriceValidity>>(this.config.services.pricing, "/A_SlsPrcgCndnRecdValidity", {
       "$filter": priceFilter(customer, salesArea, product.padStart(18, "0")),
-      "$expand": "to_SlsPrcgConditionRecord",
       "$top": 20,
     });
-    const price = (response.data.results ?? []).filter((row) => matchesScope(row, customer, salesArea)).map((row) => currentA305Price(row, this.clock())).filter((value): value is CurrentPrice => Boolean(value))
+    const price = (response.data.results ?? []).filter((row) => matchesScope(row, customer, salesArea)).map((row) => currentA305Price(row, records.get(row.ConditionRecord ?? ""), this.clock())).filter((value): value is CurrentPrice => Boolean(value))
       .reduce<CurrentPrice | undefined>((selected, candidate) => preferPrice(selected, candidate), undefined);
     if (!price) throw new Error("This product has no current ZR01 price in condition table A305 and cannot be ordered.");
     return toCatalogItem(price, await getProductDetails(this.client, this.config, price.material));
@@ -148,21 +149,36 @@ export class CatalogService {
 
   private async listCurrentPrices(customer: string, salesArea: SalesArea): Promise<Map<string, CurrentPrice>> {
     const prices = new Map<string, CurrentPrice>();
+    const records = await this.listA305Records();
     const now = this.clock();
     for (let offset = 0; ; offset += 200) {
       const response = await this.client.getAt<ODataResults<PriceValidity>>(this.config.services.pricing, "/A_SlsPrcgCndnRecdValidity", {
         "$filter": priceFilter(customer, salesArea),
         "$select": "Customer,SalesOrganization,DistributionChannel,Material,ConditionRecord,ConditionType,ConditionValidityStartDate,ConditionValidityEndDate",
-        "$expand": "to_SlsPrcgConditionRecord",
         "$top": 200,
         "$skip": offset,
       });
       const rows = response.data.results ?? [];
       for (const row of rows) {
-        const candidate = matchesScope(row, customer, salesArea) ? currentA305Price(row, now) : undefined;
+        const candidate = matchesScope(row, customer, salesArea) ? currentA305Price(row, records.get(row.ConditionRecord ?? ""), now) : undefined;
         if (candidate) prices.set(candidate.material, preferPrice(prices.get(candidate.material), candidate));
       }
       if (rows.length < 200) return prices;
+    }
+  }
+
+  private async listA305Records(): Promise<Map<string, PriceConditionRecord>> {
+    const records = new Map<string, PriceConditionRecord>();
+    for (let offset = 0; ; offset += 200) {
+      const response = await this.client.getAt<ODataResults<PriceConditionRecord>>(this.config.services.pricing, "/A_SlsPrcgConditionRecord", {
+        "$filter": "ConditionTable eq '305' and ConditionType eq 'ZR01'",
+        "$select": "ConditionRecord,ConditionTable,ConditionType,ConditionRateValue,ConditionRateValueUnit,ConditionQuantityUnit,ConditionIsDeleted",
+        "$top": 200,
+        "$skip": offset,
+      });
+      const rows = response.data.results ?? [];
+      for (const row of rows) if (row.ConditionRecord && row.ConditionTable === "305") records.set(row.ConditionRecord, row);
+      if (rows.length < 200) return records;
     }
   }
 }
