@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:web": "node dist/web-server.js",
     "test": "tsx --test test/**/*.test.ts",
     "check-config": "node scripts/check-config.mjs"
   },
@@ -17,10 +18,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
     "axios": "1.18.1",
+    "express": "5.2.1",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
+    "@types/express": "5.0.3",
     "tsx": "4.23.1",
     "typescript": "5.9.3"
   }

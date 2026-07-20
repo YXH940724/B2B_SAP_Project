@@ -42,3 +42,7 @@ npm start
 ## CCFB / Codex 接入
 
 由机器人宿主管理员将构建后的 `dist/index.js` 注册为 stdio MCP，使用 [mcp.config.example.json](mcp.config.example.json) 的结构注入密钥。重启机器人并新开对话后，MCP 工具才会可用。
+
+## 本地下单门户
+
+运行 `npm run build` 后，以环境变量方式提供 `.env.example` 中的配置并执行 `npm run start:web`。门户在 `http://localhost:3000` 提供客户号登录、A305/ZR01 价格校验、购物车和“确认同步 SAP”操作。`SAP_WRITE_ENABLED` 默认关闭；开启前必须完成 SAP 变更审批和服务账号授权。
