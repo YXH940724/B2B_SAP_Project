@@ -57,7 +57,8 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
       const issued = await deps.auth.requestCode(contact.customer);
       await deps.delivery.send(contact.customer, issued.code);
       res.status(202).json({ message: "如客户资料已维护邮箱，验证码已发送。" });
-    } catch {
+    } catch (error) {
+      if (!production) console.error(`[portal] registration request failed: ${error instanceof Error ? error.message : "unknown error"}`);
       res.status(400).json({ error: "无法提交注册请求，请确认客户号并稍后重试。" });
     }
   });

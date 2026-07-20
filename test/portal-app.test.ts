@@ -44,6 +44,25 @@ test("clears the current session on logout", async () => {
   assert.match(response.headers["set-cookie"][0], /Max-Age=0/);
 });
 
+test("logs a sanitized registration failure in development", async () => {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (message: string) => { errors.push(message); };
+  try {
+    const auth = new AuthService(createAuthStore(":memory:"));
+    const app = createPortalApp({
+      auth,
+      contact: { get: async () => { throw new Error("SAP customer email lookup failed"); } },
+      delivery: { send: async () => undefined },
+      production: false,
+    });
+    await request(app).post("/api/register/request-code").send({ customer: "100001" }).expect(400);
+    assert.deepEqual(errors, ["[portal] registration request failed: SAP customer email lookup failed"]);
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test("keeps authentication feedback outside the hidden order portal", () => {
   const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
   assert.match(html, /id="auth-message"/);
