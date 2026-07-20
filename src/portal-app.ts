@@ -201,7 +201,10 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
   });
 
   app.get("/api/customer-360", async (req, res) => {
-    try { res.json(await customer360Dependencies().get(session(req).customer)); }
+    try {
+      const active = session(req);
+      res.json(await customer360Dependencies().get(active.customer));
+    }
     catch (error) { respondRouteError(res, error); }
   });
 
