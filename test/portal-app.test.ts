@@ -132,6 +132,7 @@ test("serves the storefront navigation, catalog controls, cart and checkout fiel
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
   assert.match(html, /id="sales-area-select"/);
   assert.match(script, /api\/sales-areas/);
+  assert.match(script, /salesOrganization === "1310" && area\.distributionChannel === "10"/);
   assert.match(script, /salesOrganization/);
   assert.match(html, /id="catalog-search"/);
   assert.match(html, /id="material-groups"/);

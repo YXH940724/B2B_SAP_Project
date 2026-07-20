@@ -71,7 +71,9 @@ async function loadSalesAreas() {
     option.dataset.division = area.division;
     select.append(option);
   });
-  const defaultArea = areas.find((area) => area.salesOrganization === "1310") || areas[0];
+  const defaultArea = areas.find((area) => area.salesOrganization === "1310" && area.distributionChannel === "10")
+    || areas.find((area) => area.salesOrganization === "1310")
+    || areas[0];
   select.value = defaultArea.key;
   catalogState.salesArea = defaultArea;
 }
