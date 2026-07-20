@@ -3,7 +3,7 @@ import test from "node:test";
 import https from "node:https";
 import type { SapConfig } from "../src/config.js";
 import { assertWriteAllowed, createPayload, normalizeSalesOrder, salesOrderPath } from "../src/sales-orders.js";
-import { getCustomer, getProduct } from "../src/master-data.js";
+import { getCustomer, getProduct, normalizeCustomer } from "../src/master-data.js";
 
 const guardedConfig: SapConfig = {
   baseUrl: "https://sap.example.com/service", client: "200", username: "user", password: "secret", timeoutMs: 30000,
@@ -14,6 +14,12 @@ const guardedConfig: SapConfig = {
 test("normalizes SAP sales order IDs to ten digits", () => {
   assert.equal(normalizeSalesOrder("1372"), "0000001372");
   assert.equal(salesOrderPath("1372"), "/A_SalesOrder('0000001372')");
+});
+
+test("normalizes numeric SAP customer IDs to ten digits", () => {
+  assert.equal(normalizeCustomer("100001"), "0000100001");
+  assert.equal(normalizeCustomer("0000100001"), "0000100001");
+  assert.equal(normalizeCustomer(" A'B "), "A'B");
 });
 
 test("creates a deep-insert payload with header and line item", () => {
@@ -37,10 +43,11 @@ test("requires both the write switch and confirmation phrase", () => {
 });
 
 test("escapes OData key quotes for product and customer reads", async () => {
-  const calls: string[] = [];
-  const client = { getAt: async (_base: string, path: string) => { calls.push(path); return { data: {} }; } };
+  const calls: Array<{ path: string; params?: Record<string, string> }> = [];
+  const client = { getAt: async (_base: string, path: string, params?: Record<string, string>) => { calls.push({ path, params }); return { data: {} }; } };
   const config = guardedConfig;
   await getProduct(client as never, config, "A'B");
   await getCustomer(client as never, config, "C'1");
-  assert.deepEqual(calls, ["/A_Product('A''B')", "/A_Customer('C''1')"]);
+  assert.deepEqual(calls.map(({ path }) => path), ["/A_Product('A''B')", "/A_Customer('C''1')"]);
+  assert.doesNotMatch(calls[1].params?.["$select"] ?? "", /LastChangeDate/);
 });

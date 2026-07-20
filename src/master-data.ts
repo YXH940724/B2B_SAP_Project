@@ -5,6 +5,12 @@ function odataKey(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+/** SAP S/4HANA customer IDs are normally stored as a 10-character number. */
+export function normalizeCustomer(customer: string): string {
+  const value = customer.trim();
+  return /^\d{1,10}$/.test(value) ? value.padStart(10, "0") : value;
+}
+
 export async function getProduct(client: SapODataClient, config: SapConfig, product: string): Promise<unknown> {
   return (await client.getAt<unknown>(config.services.product, `/A_Product('${odataKey(product)}')`, {
     "$select": "Product,ProductType,ProductGroup,BaseUnit,Division,CreationDate,LastChangeDate,IsMarkedForDeletion",
@@ -12,8 +18,9 @@ export async function getProduct(client: SapODataClient, config: SapConfig, prod
 }
 
 export async function getCustomer(client: SapODataClient, config: SapConfig, customer: string): Promise<unknown> {
-  return (await client.getAt<unknown>(config.services.businessPartner, `/A_Customer('${odataKey(customer)}')`, {
-    "$select": "Customer,CustomerName,CustomerAccountGroup,DeletionIndicator,CreatedByUser,CreationDate,LastChangeDate",
+  const normalizedCustomer = normalizeCustomer(customer);
+  return (await client.getAt<unknown>(config.services.businessPartner, `/A_Customer('${odataKey(normalizedCustomer)}')`, {
+    "$select": "Customer,CustomerName,CustomerAccountGroup,DeletionIndicator,CreatedByUser,CreationDate",
   })).data;
 }
 
