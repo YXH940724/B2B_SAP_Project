@@ -5,6 +5,9 @@ import type { SalesArea } from "./sales-areas.js";
 
 type ODataResults<T> = { results?: T[] };
 
+const CATALOG_CONDITION_TYPE = "PR00";
+const CATALOG_SALES_ORGANIZATION = "1310";
+
 export interface PriceValidity {
   Customer?: string;
   SalesOrganization?: string;
@@ -115,7 +118,7 @@ export class CatalogService {
   constructor(private readonly client: SapODataClient, private readonly config: SapConfig, private readonly clock: () => Date = () => new Date()) {}
 
   async list(customerInput: string, salesArea: SalesArea, query: CatalogQuery): Promise<CatalogPage> {
-    const prices = await this.listCurrentPrices(normalizeCustomer(customerInput), salesArea);
+    const prices = await this.listCurrentPrices(normalizeCustomer(customerInput), pricingSalesArea(salesArea));
     const detailEntries = await mapWithConcurrency([...prices.values()], 8, async (price) => {
       try {
         return { price, detail: await getProductDetails(this.client, this.config, price.material) };
@@ -136,12 +139,13 @@ export class CatalogService {
 
   async getOffer(customerInput: string, salesArea: SalesArea, product: string): Promise<CatalogItem> {
     const customer = normalizeCustomer(customerInput);
+    const pricingArea = pricingSalesArea(salesArea);
     const records = await this.listA305Records();
     const response = await this.client.getAt<ODataResults<PriceValidity>>(this.config.services.pricing, "/A_SlsPrcgCndnRecdValidity", {
-      "$filter": priceFilter(customer, salesArea, product.padStart(18, "0")),
+      "$filter": priceFilter(customer, pricingArea, product.padStart(18, "0")),
       "$top": 20,
     });
-    const price = (response.data.results ?? []).filter((row) => matchesScope(row, customer, salesArea)).map((row) => currentA305Price(row, records.get(row.ConditionRecord ?? ""), this.clock())).filter((value): value is CurrentPrice => Boolean(value))
+    const price = (response.data.results ?? []).filter((row) => matchesScope(row, customer, pricingArea)).map((row) => currentA305Price(row, records.get(row.ConditionRecord ?? ""), this.clock())).filter((value): value is CurrentPrice => Boolean(value))
       .reduce<CurrentPrice | undefined>((selected, candidate) => preferPrice(selected, candidate), undefined);
     if (!price) throw new Error("This product has no current ZR01 price in condition table A305 and cannot be ordered.");
     return toCatalogItem(price, await getProductDetails(this.client, this.config, price.material));
@@ -171,7 +175,7 @@ export class CatalogService {
     const records = new Map<string, PriceConditionRecord>();
     for (let offset = 0; ; offset += 200) {
       const response = await this.client.getAt<ODataResults<PriceConditionRecord>>(this.config.services.pricing, "/A_SlsPrcgConditionRecord", {
-        "$filter": "ConditionTable eq '305' and ConditionType eq 'ZR01'",
+        "$filter": `ConditionTable eq '305' and ConditionType eq '${CATALOG_CONDITION_TYPE}'`,
         "$select": "ConditionRecord,ConditionTable,ConditionType,ConditionRateValue,ConditionRateValueUnit,ConditionQuantityUnit,ConditionIsDeleted",
         "$top": 200,
         "$skip": offset,
@@ -185,7 +189,7 @@ export class CatalogService {
 
 function priceFilter(customer: string, salesArea: SalesArea, material?: string): string {
   const predicates = [
-    "ConditionType eq 'ZR01'",
+    `ConditionType eq '${CATALOG_CONDITION_TYPE}'`,
     `Customer eq '${odataKey(customer)}'`,
     `SalesOrganization eq '${odataKey(salesArea.salesOrganization)}'`,
     `DistributionChannel eq '${odataKey(salesArea.distributionChannel)}'`,
@@ -198,6 +202,10 @@ function matchesScope(row: PriceValidity, customer: string, salesArea: SalesArea
   return row.Customer === customer
     && row.SalesOrganization === salesArea.salesOrganization
     && row.DistributionChannel === salesArea.distributionChannel;
+}
+
+function pricingSalesArea(salesArea: SalesArea): SalesArea {
+  return { ...salesArea, salesOrganization: CATALOG_SALES_ORGANIZATION, key: `${CATALOG_SALES_ORGANIZATION}/${salesArea.distributionChannel}/${salesArea.division}` };
 }
 
 function toCatalogItem(price: CurrentPrice, detail: ProductDetails): CatalogItem {

@@ -41,7 +41,7 @@ function makeClient() {
               {
                 Material: "000000000000001386",
                 Customer: "0000100001",
-                SalesOrganization: "1000",
+                SalesOrganization: "1310",
                 DistributionChannel: "10",
                 ConditionRecord: "0000000123",
                 ConditionValidityStartDate: "/Date(1782777600000)/",
@@ -50,7 +50,7 @@ function makeClient() {
               {
                 Material: "000000000000001387",
                 Customer: "0000100001",
-                SalesOrganization: "1000",
+                SalesOrganization: "1310",
                 DistributionChannel: "10",
                 ConditionRecord: "0000000124",
                 ConditionValidityStartDate: "/Date(1782777600000)/",
@@ -59,7 +59,7 @@ function makeClient() {
               {
                 Material: "000000000000001390",
                 Customer: "0000100002",
-                SalesOrganization: "1000",
+                SalesOrganization: "1310",
                 DistributionChannel: "10",
                 ConditionRecord: "0000000127",
                 ConditionValidityStartDate: "/Date(1782777600000)/",
@@ -79,7 +79,7 @@ function makeClient() {
               {
                 Material: "000000000000001388",
                 Customer: "0000100001",
-                SalesOrganization: "1000",
+                SalesOrganization: "1310",
                 DistributionChannel: "10",
                 ConditionRecord: "0000000125",
                 ConditionValidityStartDate: "/Date(1719792000000)/",
@@ -88,7 +88,7 @@ function makeClient() {
               {
                 Material: "000000000000001389",
                 Customer: "0000100001",
-                SalesOrganization: "1000",
+                SalesOrganization: "1310",
                 DistributionChannel: "10",
                 ConditionRecord: "0000000126",
                 ConditionValidityStartDate: "/Date(1782777600000)/",
@@ -109,9 +109,9 @@ function makeClient() {
   };
 }
 
-const salesArea: SalesArea = { salesOrganization: "1000", distributionChannel: "10", division: "00", key: "1000/10/00" };
+const salesArea: SalesArea = { salesOrganization: "1310", distributionChannel: "10", division: "00", key: "1310/10/00" };
 
-test("lists only current A305 ZR01 products with product details and pagination", async () => {
+test("lists only current A305 PR00 products with product details and pagination", async () => {
   const catalog = new CatalogService(makeClient() as never, config, () => new Date("2026-07-20T00:00:00Z"));
   const page = await catalog.list("0000100001", salesArea, { page: 1, pageSize: 1, sort: "material" });
 
@@ -155,7 +155,7 @@ test("keeps only prices matching the customer and selected sales area", async ()
   const page = await catalog.list("100001", salesArea, { page: 1, pageSize: 20, sort: "material" });
 
   assert.match(String(requests[0]?.["$filter"]), /Customer eq '0000100001'/);
-  assert.match(String(requests[0]?.["$filter"]), /SalesOrganization eq '1000'/);
+  assert.match(String(requests[0]?.["$filter"]), /SalesOrganization eq '1310'/);
   assert.match(String(requests[0]?.["$filter"]), /DistributionChannel eq '10'/);
   assert.deepEqual(page.items.map((item) => item.product), ["000000000000001386", "000000000000001387"]);
 });
@@ -169,7 +169,7 @@ test("loads A305 condition records before looking up their scoped price validiti
         return { data: { results: [{ ConditionRecord: "0000000123", ConditionTable: "305", ConditionRateValue: "30.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "PC", ConditionIsDeleted: false }] } };
       }
       if (path === "/A_SlsPrcgCndnRecdValidity") {
-        return { data: { results: [{ Material: "000000000000001386", Customer: "0000100001", SalesOrganization: "1000", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
+        return { data: { results: [{ Material: "000000000000001386", Customer: "0000100001", SalesOrganization: "1310", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
       }
       if (path === "/A_Product('000000000000001386')") {
         return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
@@ -183,7 +183,26 @@ test("loads A305 condition records before looking up their scoped price validiti
 
   assert.equal(calls[0]?.path, "/A_SlsPrcgConditionRecord");
   assert.match(String(calls[0]?.params?.["$filter"]), /ConditionTable eq '305'/);
-  assert.match(String(calls[0]?.params?.["$filter"]), /ConditionType eq 'ZR01'/);
+  assert.match(String(calls[0]?.params?.["$filter"]), /ConditionType eq 'PR00'/);
   assert.equal(calls[1]?.path, "/A_SlsPrcgCndnRecdValidity");
   assert.deepEqual(page.items.map((item) => item.product), ["000000000000001386"]);
+});
+
+test("temporarily scopes A305 catalog pricing to sales organization 1310 and PR00", async () => {
+  const calls: Array<{ path: string; params?: Record<string, string | number | undefined> }> = [];
+  const client = {
+    getAt: async (_service: string, path: string, params?: Record<string, string | number | undefined>) => {
+      calls.push({ path, params });
+      if (path === "/A_SlsPrcgConditionRecord") return { data: { results: [] } };
+      if (path === "/A_SlsPrcgCndnRecdValidity") return { data: { results: [] } };
+      throw new Error(`Unexpected request ${path}`);
+    },
+  };
+  const catalog = new CatalogService(client as never, config);
+
+  await catalog.list("100001", { salesOrganization: "9999", distributionChannel: "10", division: "00", key: "9999/10/00" }, { page: 1, pageSize: 20, sort: "material" });
+
+  assert.match(String(calls[0]?.params?.["$filter"]), /ConditionType eq 'PR00'/);
+  assert.match(String(calls[1]?.params?.["$filter"]), /ConditionType eq 'PR00'/);
+  assert.match(String(calls[1]?.params?.["$filter"]), /SalesOrganization eq '1310'/);
 });
