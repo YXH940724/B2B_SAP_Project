@@ -17,12 +17,15 @@ test("resolves an email through the customer's business partner address", async 
     getAt: async (_base: string, path: string, params?: Record<string, string | number | undefined>) => {
       calls.push({ path, params });
       if (path.startsWith("/A_Customer")) return { data: { Customer: "0000100001" } };
+      if (path === "/A_BusinessPartner") return { data: { results: [{ BusinessPartner: "0000000046" }] } };
       return { data: { results: [{ to_EmailAddress: { results: [{ EmailAddress: "buyer@example.test" }] } }] } };
     },
   };
   assert.deepEqual(await getCustomerRegistrationContact(client as never, config, "100001"), { customer: "0000100001", email: "buyer@example.test" });
-  assert.deepEqual(calls.map((call) => call.path), ["/A_Customer('0000100001')", "/A_BusinessPartnerAddress"]);
+  assert.deepEqual(calls.map((call) => call.path), ["/A_Customer('0000100001')", "/A_BusinessPartner", "/A_BusinessPartnerAddress"]);
   assert.equal(calls[0].params?.["$select"], "Customer");
+  assert.equal(calls[1].params?.["$filter"], "Customer eq '0000100001'");
+  assert.equal(calls[2].params?.["$filter"], "BusinessPartner eq '0000000046'");
 });
 
 test("refuses log delivery outside development", () => {

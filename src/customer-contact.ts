@@ -6,6 +6,10 @@ interface CustomerIdentity {
   Customer?: string;
 }
 
+interface CustomerBusinessPartners {
+  results?: Array<{ BusinessPartner?: string }>;
+}
+
 interface BusinessPartnerAddresses {
   results?: Array<{ to_EmailAddress?: { results?: Array<{ EmailAddress?: string }> } }>;
 }
@@ -15,7 +19,13 @@ export async function getCustomerRegistrationContact(client: SapODataClient, con
   const identity = await client.getAt<CustomerIdentity>(config.services.businessPartner, `/A_Customer('${odataKey(customer)}')`, {
     "$select": "Customer",
   });
-  const businessPartner = normalizeCustomer(identity.data.Customer ?? customer);
+  const mappings = await client.getAt<CustomerBusinessPartners>(config.services.businessPartner, "/A_BusinessPartner", {
+    "$filter": `Customer eq '${odataKey(identity.data.Customer ?? customer)}'`,
+    "$select": "BusinessPartner,Customer",
+    "$top": 1,
+  });
+  const businessPartner = mappings.data.results?.[0]?.BusinessPartner?.trim();
+  if (!businessPartner) throw new Error("该客户未关联业务伙伴，暂不支持自助注册。");
   const addresses = await client.getAt<BusinessPartnerAddresses>(config.services.businessPartner, "/A_BusinessPartnerAddress", {
     "$filter": `BusinessPartner eq '${odataKey(businessPartner)}'`,
     "$expand": "to_EmailAddress",
