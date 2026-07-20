@@ -4,7 +4,6 @@ import { SapODataClient } from "./odata-client.js";
 
 interface CustomerIdentity {
   Customer?: string;
-  BusinessPartner?: string;
 }
 
 interface BusinessPartnerAddresses {
@@ -14,10 +13,9 @@ interface BusinessPartnerAddresses {
 export async function getCustomerRegistrationContact(client: SapODataClient, config: SapConfig, customerInput: string): Promise<{ customer: string; email: string }> {
   const customer = normalizeCustomer(customerInput);
   const identity = await client.getAt<CustomerIdentity>(config.services.businessPartner, `/A_Customer('${odataKey(customer)}')`, {
-    "$select": "Customer,BusinessPartner",
+    "$select": "Customer",
   });
-  const businessPartner = identity.data.BusinessPartner;
-  if (!businessPartner) throw new Error("该客户暂不支持自助注册。");
+  const businessPartner = normalizeCustomer(identity.data.Customer ?? customer);
   const addresses = await client.getAt<BusinessPartnerAddresses>(config.services.businessPartner, "/A_BusinessPartnerAddress", {
     "$filter": `BusinessPartner eq '${odataKey(businessPartner)}'`,
     "$expand": "to_EmailAddress",
