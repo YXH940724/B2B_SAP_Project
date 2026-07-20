@@ -58,3 +58,26 @@ npm run start:web
 ```
 
 `SAP_WRITE_ENABLED` 默认关闭；开启前必须完成 SAP 变更审批和服务账号授权。
+
+### 客户商城目录与购物车
+
+登录后的门户是一个面向客户的 B2B 订货商城：
+
+- 默认展示条件类型 `ZR01`、条件表 `A305` 且当前有效的物料；没有有效价格的物料不会显示或下单。
+- 左侧目录来自 SAP 物料组，商品卡显示物料号、物料描述、销售单位和当前价格；搜索支持物料号或描述，默认每页 20 条（接口只接受 1–50）。
+- 购物车只保存于当前浏览器会话。进入结算时服务端会重新读取 SAP 价格和可售性，不能信任浏览器传来的单价。
+- 结算可收集期望交货日期、客户采购订单号和备注。前两项分别映射至 SAP 的 `RequestedDeliveryDate` 与 `PurchaseOrderByCustomer`。备注会显示在门户确认摘要中；在确认 SAP 已配置可写入的订单文本扩展字段前，系统不会将任意备注字段发送给 SAP。
+- “确认并同步至 SAP”会再次显示订单摘要，之后服务端仍需 `SAP_WRITE_ENABLED=true` 才会执行 OData POST。开发自测不要提交真实销售订单。
+
+本地开发启动方式：
+
+```bash
+npm install
+npm run build
+set -a
+source ~/.config/sap-odata-mcp/.env
+set +a
+NODE_ENV=development VERIFICATION_DELIVERY=log npm run start:web
+```
+
+浏览器打开 `http://localhost:3000`。生产环境必须配置企业 CA 证书并使用真实邮件投递；不要关闭 TLS 校验，也不要将环境文件、证书、验证码或 SAP 凭据提交到 Git。
