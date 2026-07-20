@@ -8,6 +8,7 @@ import { SapODataClient } from "./odata-client.js";
 import { getSellableOffer } from "./portal.js";
 import { assertWriteAllowed, createPayload, PortalCheckoutSchema } from "./sales-orders.js";
 import type { SalesArea } from "./sales-areas.js";
+import type { Customer360Profile } from "./customer-360.js";
 import type { VerificationDelivery } from "./verification-delivery.js";
 
 export interface PortalDependencies {
@@ -18,6 +19,7 @@ export interface PortalDependencies {
   catalog?: { list(customer: string, salesArea: SalesArea, query: CatalogQuery): Promise<CatalogPage> };
   salesAreas?: { list(customer: string): Promise<SalesArea[]> };
   customer?: { get(customer: string): Promise<{ customer: string; name: string; accountGroup: string; businessPartner: string }> };
+  customer360?: { get(customer: string): Promise<Customer360Profile> };
   staticRoot?: string;
   production?: boolean;
 }
@@ -111,6 +113,11 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     return deps.customer;
   }
 
+  function customer360Dependencies(): NonNullable<PortalDependencies["customer360"]> {
+    if (!deps.customer360) throw new Error("客户 360 服务尚未配置。");
+    return deps.customer360;
+  }
+
   function salesAreaDependencies(): NonNullable<PortalDependencies["salesAreas"]> {
     if (!deps.salesAreas) throw new Error("客户销售范围服务尚未配置。");
     return deps.salesAreas;
@@ -191,6 +198,11 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
       const active = session(req);
       res.json(await customerDependencies().get(active.customer));
     } catch (error) { respondRouteError(res, error); }
+  });
+
+  app.get("/api/customer-360", async (req, res) => {
+    try { res.json(await customer360Dependencies().get(session(req).customer)); }
+    catch (error) { respondRouteError(res, error); }
   });
 
   app.post("/api/orders/preview", async (req, res) => {

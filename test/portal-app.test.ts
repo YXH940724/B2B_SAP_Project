@@ -114,6 +114,7 @@ test("returns a session-protected, paginated catalog and customer summary", asyn
 
 test("rejects catalog requests without a session and rejects invalid page size", async () => {
   await request(makeStorefrontApp().app).get("/api/catalog?pageSize=20").expect(401);
+  await request(makeStorefrontApp().app).get("/api/customer-360").expect(401);
   const agent = await registeredAgent(makeStorefrontApp);
   await agent.get("/api/catalog?salesOrganization=1000&distributionChannel=10&division=00&pageSize=51").expect(400);
   await agent.get("/api/catalog?salesOrganization=9999&distributionChannel=10&division=00").expect(400);

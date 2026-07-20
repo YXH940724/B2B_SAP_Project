@@ -8,6 +8,7 @@ import { getCustomerPortalProfile, getCustomerRegistrationContact } from "./cust
 import { SapODataClient } from "./odata-client.js";
 import { createPortalApp } from "./portal-app.js";
 import { listCustomerSalesAreas } from "./sales-areas.js";
+import { getCustomer360 } from "./customer-360.js";
 import { createVerificationDelivery, type VerificationDelivery } from "./verification-delivery.js";
 
 export function createConfiguredPortalApp(config: ReturnType<typeof loadConfig>, client: SapODataClient, options: { auth?: AuthService; delivery?: VerificationDelivery; staticRoot?: string } = {}) {
@@ -19,6 +20,7 @@ export function createConfiguredPortalApp(config: ReturnType<typeof loadConfig>,
     catalog: new CatalogService(client, config),
     salesAreas: { list: (customer) => listCustomerSalesAreas(client, config, customer) },
     customer: { get: (customer) => getCustomerPortalProfile(client, config, customer) },
+    customer360: { get: (customer) => getCustomer360(client, config, customer) },
     staticRoot: options.staticRoot,
   });
 }
