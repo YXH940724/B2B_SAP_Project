@@ -12,18 +12,23 @@ const ItemSchema = z.object({
   plant: z.string().min(1).max(4).optional(),
 }).strict();
 
+export const PortalCheckoutSchema = z.object({
+  requested_delivery_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  purchase_order_by_customer: z.string().trim().min(1).max(35).optional(),
+  portal_note: z.string().trim().max(500).optional(),
+}).strict();
+
 export const CreateSalesOrderSchema = z.object({
   sales_order_type: z.string().min(1).max(4),
   sales_organization: z.string().min(1).max(4),
   distribution_channel: z.string().min(1).max(2),
   organization_division: z.string().min(1).max(2),
   sold_to_party: z.string().min(1).max(10),
-  purchase_order_by_customer: z.string().min(1).max(35).optional(),
   items: z.array(ItemSchema).min(1).max(100),
   dry_run: z.boolean().default(true),
   confirm: z.literal("CREATE_SALES_ORDER").optional(),
   response_format: ResponseFormat,
-}).strict();
+}).merge(PortalCheckoutSchema);
 
 export const UpdateSalesOrderSchema = z.object({
   sales_order: SalesOrderId,
@@ -53,6 +58,7 @@ export function createPayload(input: CreateSalesOrderInput): Record<string, unkn
     OrganizationDivision: input.organization_division,
     SoldToParty: input.sold_to_party,
     ...(input.purchase_order_by_customer ? { PurchaseOrderByCustomer: input.purchase_order_by_customer } : {}),
+    ...(input.requested_delivery_date ? { RequestedDeliveryDate: `${input.requested_delivery_date}T00:00:00` } : {}),
     to_Item: { results: input.items.map((item) => ({
       Material: item.material,
       RequestedQuantity: String(item.requested_quantity),

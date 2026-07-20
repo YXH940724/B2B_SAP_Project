@@ -18,6 +18,31 @@ function makeApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => st
   return { app, getCode: () => code };
 }
 
+function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string } {
+  let code = "";
+  const auth = new AuthService(createAuthStore(":memory:"), () => 1_700_000_000_000, () => "123456");
+  const app = createPortalApp({
+    auth,
+    contact: { get: async (customer: string) => ({ customer: customer.padStart(10, "0"), email: "buyer@example.test" }) },
+    delivery: { send: async (_customer: string, sentCode: string) => { code = sentCode; } },
+    catalog: { list: async () => ({
+      items: [{ product: "000000000000001386", description: "演示物料", productGroup: "FG", baseUnit: "PC", conditionRecord: "0000000123", unitPrice: "30.00", currency: "CNY", priceUnit: "PC" }],
+      groups: [{ code: "FG", label: "FG", count: 1 }], page: 1, pageSize: 20, total: 1, pageCount: 1,
+    }) },
+    customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
+  });
+  return { app, getCode: () => code };
+}
+
+async function registeredAgent(factory: () => { app: ReturnType<typeof createPortalApp>; getCode: () => string }) {
+  const { app, getCode } = factory();
+  const agent = request.agent(app);
+  await agent.post("/api/register/request-code").send({ customer: "100001" }).expect(202);
+  await agent.post("/api/register/verify").send({ customer: "100001", code: getCode(), password: "123456789012" }).expect(201);
+  await agent.post("/api/login").send({ customer: "100001", password: "123456789012" }).expect(200);
+  return agent;
+}
+
 test("does not create a cookie when a portal login password is incorrect", async () => {
   const { app } = makeApp();
   const response = await request(app).post("/api/login").send({ customer: "100001", password: "wrong-password" });
@@ -67,4 +92,29 @@ test("keeps authentication feedback outside the hidden order portal", () => {
   const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
   assert.match(html, /id="auth-message"/);
   assert.doesNotMatch(html, /<section id="portal" hidden>[\s\S]*id="auth-message"/);
+});
+
+test("returns a session-protected, paginated catalog and customer summary", async () => {
+  const agent = await registeredAgent(makeStorefrontApp);
+  const response = await agent.get("/api/catalog?query=1386&group=FG&page=1&pageSize=20&sort=material").expect(200);
+  assert.equal(response.body.items[0].product, "000000000000001386");
+  assert.equal(response.body.groups[0].code, "FG");
+  assert.equal(response.body.page, 1);
+  assert.deepEqual((await agent.get("/api/me").expect(200)).body, {
+    customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046",
+  });
+});
+
+test("rejects catalog requests without a session and rejects invalid page size", async () => {
+  await request(makeStorefrontApp().app).get("/api/catalog?pageSize=20").expect(401);
+  const agent = await registeredAgent(makeStorefrontApp);
+  await agent.get("/api/catalog?pageSize=51").expect(400);
+});
+
+test("rejects an invalid checkout delivery date before SAP pricing", async () => {
+  const agent = await registeredAgent(makeStorefrontApp);
+  const response = await agent.post("/api/orders/preview").send({
+    items: [{ product: "1386", quantity: 1 }], requestedDeliveryDate: "2026/08/01",
+  }).expect(400);
+  assert.match(response.body.error, /期望交货日期/);
 });

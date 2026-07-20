@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import https from "node:https";
 import type { SapConfig } from "../src/config.js";
-import { getCustomerRegistrationContact } from "../src/customer-contact.js";
+import { getCustomerPortalProfile, getCustomerRegistrationContact } from "../src/customer-contact.js";
 import { createVerificationDelivery } from "../src/verification-delivery.js";
 
 const config: SapConfig = {
@@ -26,6 +26,22 @@ test("resolves an email through the customer's business partner address", async 
   assert.equal(calls[0].params?.["$select"], "Customer");
   assert.equal(calls[1].params?.["$filter"], "Customer eq '0000100001'");
   assert.equal(calls[2].params?.["$filter"], "BusinessPartner eq '0000000046'");
+});
+
+test("resolves a portal customer summary through the customer-to-business-partner mapping", async () => {
+  const calls: Array<{ path: string; params?: Record<string, string | number | undefined> }> = [];
+  const client = {
+    getAt: async (_base: string, path: string, params?: Record<string, string | number | undefined>) => {
+      calls.push({ path, params });
+      if (path.startsWith("/A_Customer")) return { data: { Customer: "0000100001", CustomerName: "演示客户", CustomerAccountGroup: "Z001" } };
+      return { data: { results: [{ BusinessPartner: "0000000046" }] } };
+    },
+  };
+  assert.deepEqual(await getCustomerPortalProfile(client as never, config, "100001"), {
+    customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046",
+  });
+  assert.equal(calls[0].params?.["$select"], "Customer,CustomerName,CustomerAccountGroup");
+  assert.equal(calls[1].params?.["$filter"], "Customer eq '0000100001'");
 });
 
 test("refuses log delivery outside development", () => {

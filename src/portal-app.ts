@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
 import express from "express";
 import type { AuthService } from "./auth-service.js";
+import type { CatalogPage, CatalogQuery } from "./catalog.js";
 import type { SapConfig } from "./config.js";
 import { normalizeCustomer } from "./master-data.js";
 import { SapODataClient } from "./odata-client.js";
 import { getSellableOffer } from "./portal.js";
-import { assertWriteAllowed, createPayload } from "./sales-orders.js";
+import { assertWriteAllowed, createPayload, PortalCheckoutSchema } from "./sales-orders.js";
 import type { VerificationDelivery } from "./verification-delivery.js";
 
 export interface PortalDependencies {
@@ -13,6 +14,8 @@ export interface PortalDependencies {
   contact: { get(customer: string): Promise<{ customer: string; email: string }> };
   delivery: VerificationDelivery;
   order?: { config: SapConfig; client: SapODataClient };
+  catalog?: { list(query: CatalogQuery): Promise<CatalogPage> };
+  customer?: { get(customer: string): Promise<{ customer: string; name: string; accountGroup: string; businessPartner: string }> };
   staticRoot?: string;
   production?: boolean;
 }
@@ -32,6 +35,43 @@ function setSessionCookie(res: express.Response, token: string, production: bool
   res.setHeader("Set-Cookie", `portal_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${production ? "; Secure" : ""}`);
 }
 
+function integerQuery(input: unknown, fallback: number, min: number, max: number): number {
+  if (input === undefined || input === "") return fallback;
+  const value = Number(input);
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error("目录分页参数无效。");
+  return value;
+}
+
+function catalogQuery(req: express.Request): CatalogQuery {
+  const sort = req.query.sort === undefined || req.query.sort === "" ? "material" : String(req.query.sort);
+  if (sort !== "material" && sort !== "price") throw new Error("目录排序参数无效。");
+  return {
+    query: typeof req.query.query === "string" ? req.query.query : undefined,
+    group: typeof req.query.group === "string" ? req.query.group : undefined,
+    page: integerQuery(req.query.page, 1, 1, 100000),
+    pageSize: integerQuery(req.query.pageSize, 20, 1, 50),
+    sort,
+  };
+}
+
+function optionalText(input: unknown): string | undefined {
+  const value = typeof input === "string" ? input.trim() : "";
+  return value || undefined;
+}
+
+function checkoutFields(body: unknown): { requested_delivery_date?: string; purchase_order_by_customer?: string; portal_note?: string } {
+  const source = body as { requestedDeliveryDate?: unknown; purchaseOrderByCustomer?: unknown; note?: unknown } | undefined;
+  const parsed = PortalCheckoutSchema.safeParse({
+    requested_delivery_date: optionalText(source?.requestedDeliveryDate),
+    purchase_order_by_customer: optionalText(source?.purchaseOrderByCustomer),
+    portal_note: optionalText(source?.note),
+  });
+  if (parsed.success) return parsed.data;
+  if (parsed.error.issues.some((issue) => issue.path[0] === "requested_delivery_date")) throw new Error("期望交货日期格式无效。");
+  if (parsed.error.issues.some((issue) => issue.path[0] === "purchase_order_by_customer")) throw new Error("客户采购订单号无效。");
+  throw new Error("订单备注无效。");
+}
+
 export function createPortalApp(deps: PortalDependencies): express.Express {
   const app = express();
   const sessions = new Map<string, Session>();
@@ -49,6 +89,21 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
   function orderDependencies(): { config: SapConfig; client: SapODataClient } {
     if (!deps.order) throw new Error("下单服务尚未配置。");
     return deps.order;
+  }
+
+  function catalogDependencies(): NonNullable<PortalDependencies["catalog"]> {
+    if (!deps.catalog) throw new Error("商品目录服务尚未配置。");
+    return deps.catalog;
+  }
+
+  function customerDependencies(): NonNullable<PortalDependencies["customer"]> {
+    if (!deps.customer) throw new Error("客户摘要服务尚未配置。");
+    return deps.customer;
+  }
+
+  function respondRouteError(res: express.Response, error: unknown): void {
+    const message = error instanceof Error ? error.message : "请求失败。";
+    res.status(message === "请重新登录。" ? 401 : 400).json({ error: message });
   }
 
   app.post("/api/register/request-code", async (req, res) => {
@@ -93,17 +148,24 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     res.status(204).end();
   });
 
-  app.get("/api/catalog/:product", async (req, res) => {
+  app.get("/api/catalog", async (req, res) => {
     try {
       session(req);
-      const { client, config } = orderDependencies();
-      res.json(await getSellableOffer(client, config, req.params.product));
-    } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }
+      res.json(await catalogDependencies().list(catalogQuery(req)));
+    } catch (error) { respondRouteError(res, error); }
+  });
+
+  app.get("/api/me", async (req, res) => {
+    try {
+      const active = session(req);
+      res.json(await customerDependencies().get(active.customer));
+    } catch (error) { respondRouteError(res, error); }
   });
 
   app.post("/api/orders/preview", async (req, res) => {
     try {
       session(req);
+      const checkout = checkoutFields(req.body);
       const { client, config } = orderDependencies();
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       if (!items.length || items.length > 100) throw new Error("请提供 1 至 100 行订单项目。");
@@ -113,13 +175,14 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
         const offer = await getSellableOffer(client, config, String(item.product));
         return { ...offer, productId: String(item.product), quantity, lineTotal: Number(offer.unitPrice) * quantity };
       }));
-      res.json({ items: priced, total: priced.reduce((sum, item) => sum + item.lineTotal, 0) });
+      res.json({ items: priced, total: priced.reduce((sum, item) => sum + item.lineTotal, 0), checkout });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }
   });
 
   app.post("/api/orders/submit", async (req, res) => {
     try {
       const { customer } = session(req);
+      const checkout = checkoutFields(req.body);
       const { client, config } = orderDependencies();
       if (req.body?.confirm !== true) throw new Error("请确认订单后再同步 SAP。");
       const preview = await Promise.all((req.body?.items ?? []).map(async (item: { product: string; quantity: number; plant?: string }) => {
@@ -128,7 +191,7 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
       }));
       if (!preview.length) throw new Error("订单没有项目。");
       assertWriteAllowed(config, "CREATE_SALES_ORDER", "CREATE_SALES_ORDER");
-      const payload = createPayload({ sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR", sales_organization: process.env.PORTAL_SALES_ORGANIZATION ?? "1000", distribution_channel: process.env.PORTAL_DISTRIBUTION_CHANNEL ?? "10", organization_division: process.env.PORTAL_DIVISION ?? "00", sold_to_party: customer, items: preview, dry_run: false, confirm: "CREATE_SALES_ORDER", response_format: "json" });
+      const payload = createPayload({ sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR", sales_organization: process.env.PORTAL_SALES_ORGANIZATION ?? "1000", distribution_channel: process.env.PORTAL_DISTRIBUTION_CHANNEL ?? "10", organization_division: process.env.PORTAL_DIVISION ?? "00", sold_to_party: customer, ...checkout, items: preview, dry_run: false, confirm: "CREATE_SALES_ORDER", response_format: "json" });
       const created = await client.write<unknown>("post", "/A_SalesOrder", payload);
       res.json({ success: true, salesOrder: created.data });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }

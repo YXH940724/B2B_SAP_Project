@@ -34,6 +34,17 @@ test("creates a deep-insert payload with header and line item", () => {
   });
 });
 
+test("maps purchase reference and requested delivery date into the SAP payload", () => {
+  const payload = createPayload({
+    sales_order_type: "OR", sales_organization: "1000", distribution_channel: "10", organization_division: "00", sold_to_party: "0000100001",
+    purchase_order_by_customer: "PO-2026-01", requested_delivery_date: "2026-08-01",
+    items: [{ material: "000000000000001386", requested_quantity: 2, requested_quantity_unit: "PC" }],
+    dry_run: false, response_format: "json",
+  });
+  assert.equal(payload.PurchaseOrderByCustomer, "PO-2026-01");
+  assert.equal(payload.RequestedDeliveryDate, "2026-08-01T00:00:00");
+});
+
 test("requires both the write switch and confirmation phrase", () => {
   assert.throws(() => assertWriteAllowed(guardedConfig, "UPDATE_SALES_ORDER", "UPDATE_SALES_ORDER"), /writes are disabled/);
   const enabled = { ...guardedConfig, writeEnabled: true };
