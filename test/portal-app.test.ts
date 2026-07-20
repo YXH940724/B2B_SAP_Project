@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import request from "supertest";
 import { AuthService } from "../src/auth-service.js";
@@ -40,4 +42,10 @@ test("clears the current session on logout", async () => {
   const login = await request(app).post("/api/login").send({ customer: "100001", password: "123456789012" }).expect(200);
   const response = await request(app).post("/api/logout").set("Cookie", login.headers["set-cookie"][0]).expect(204);
   assert.match(response.headers["set-cookie"][0], /Max-Age=0/);
+});
+
+test("keeps authentication feedback outside the hidden order portal", () => {
+  const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  assert.match(html, /id="auth-message"/);
+  assert.doesNotMatch(html, /<section id="portal" hidden>[\s\S]*id="auth-message"/);
 });

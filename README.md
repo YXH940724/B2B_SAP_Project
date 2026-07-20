@@ -45,4 +45,16 @@ npm start
 
 ## 本地下单门户
 
-运行 `npm run build` 后，以环境变量方式提供 `.env.example` 中的配置并执行 `npm run start:web`。门户在 `http://localhost:3000` 提供客户号登录、A305/ZR01 价格校验、购物车和“确认同步 SAP”操作。`SAP_WRITE_ENABLED` 默认关闭；开启前必须完成 SAP 变更审批和服务账号授权。
+运行 `npm run build` 后，以环境变量方式提供 `.env.example` 中的配置并执行 `npm run start:web`。门户在 `http://localhost:3000` 提供客户自助注册、客户号登录、A305/ZR01 价格校验、购物车和“确认同步 SAP”操作。客户密码以哈希保存于 `PORTAL_DB_PATH` 指定的 SQLite 文件，不写入 SAP。
+
+本地开发可在受保护的环境文件中设置 `NODE_ENV=development` 和 `VERIFICATION_DELIVERY=log`；验证码只输出到启动服务的终端日志，勿向他人转发。生产环境禁止日志投递，必须接入邮件服务后再开放注册。典型启动方式：
+
+```bash
+set -a
+source ~/.config/sap-odata-mcp/.env
+set +a
+npm run build
+npm run start:web
+```
+
+`SAP_WRITE_ENABLED` 默认关闭；开启前必须完成 SAP 变更审批和服务账号授权。

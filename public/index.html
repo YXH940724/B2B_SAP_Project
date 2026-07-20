@@ -1,1 +1,58 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SAP 客户下单</title><link rel="stylesheet" href="/styles.css"></head><body><main><section id="login"><h1>SAP 客户下单</h1><p>使用客户号登录后，仅可选择具有 A305 / ZR01 有效价格的物料。</p><form id="login-form"><input id="customer" placeholder="SAP 客户号" required><input id="password" type="password" placeholder="门户密码" required><button>登录</button></form></section><section id="portal" hidden><header><h1>客户下单</h1><p id="customer-info"></p></header><form id="product-form"><input id="product" placeholder="物料号，例如 1386" required><input id="quantity" type="number" min="1" value="1" required><button>查询并加入</button></form><div id="message" role="alert"></div><table><thead><tr><th>物料</th><th>单价</th><th>数量</th><th>金额</th><th></th></tr></thead><tbody id="cart"></tbody></table><p id="total">合计：0</p><button id="submit" disabled>确认并同步到 SAP</button></section></main><script src="/app.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SAP 客户下单</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <section id="auth">
+      <h1>SAP 客户下单</h1>
+      <p>登录后，仅可选择具有 A305 / ZR01 有效价格的物料。</p>
+      <div id="auth-message" role="alert" aria-live="polite"></div>
+
+      <section id="login-panel">
+        <form id="login-form">
+          <input id="customer" inputmode="numeric" placeholder="SAP 客户号" required>
+          <input id="password" type="password" autocomplete="current-password" placeholder="门户密码" required>
+          <button id="login-button">登录</button>
+        </form>
+        <button id="show-register" type="button" class="link-button">首次使用？开户注册</button>
+      </section>
+
+      <section id="register-request-panel" hidden>
+        <h2>开户注册</h2>
+        <p>验证码将发送到 SAP 客户主数据维护的邮箱。开发环境请在服务端日志中查看验证码。</p>
+        <form id="register-request-form">
+          <input id="register-customer" inputmode="numeric" placeholder="SAP 客户号" required>
+          <button id="request-code-button">获取验证码</button>
+        </form>
+        <button type="button" class="link-button back-to-login">返回登录</button>
+      </section>
+
+      <section id="register-verify-panel" hidden>
+        <h2>设置门户密码</h2>
+        <form id="register-verify-form">
+          <input id="verify-customer" inputmode="numeric" placeholder="SAP 客户号" required readonly>
+          <input id="verification-code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" required>
+          <input id="register-password" type="password" autocomplete="new-password" minlength="12" placeholder="设置至少 12 位门户密码" required>
+          <button id="verify-button">完成注册</button>
+        </form>
+        <button type="button" class="link-button back-to-login">返回登录</button>
+      </section>
+    </section>
+
+    <section id="portal" hidden>
+      <header><h1>客户下单</h1><p id="customer-info"></p></header>
+      <form id="product-form"><input id="product" placeholder="物料号，例如 1386" required><input id="quantity" type="number" min="1" value="1" required><button>查询并加入</button></form>
+      <div id="portal-message" role="alert"></div>
+      <table><thead><tr><th>物料</th><th>单价</th><th>数量</th><th>金额</th><th></th></tr></thead><tbody id="cart"></tbody></table>
+      <p id="total">合计：0</p><button id="submit" disabled>确认并同步到 SAP</button>
+      <button id="logout" type="button" class="link-button">退出登录</button>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
