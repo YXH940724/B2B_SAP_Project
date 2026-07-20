@@ -11,6 +11,29 @@ export function normalizeCustomer(customer: string): string {
   return /^\d{1,10}$/.test(value) ? value.padStart(10, "0") : value;
 }
 
+export interface ProductDetails {
+  product: string;
+  description: string;
+  productGroup: string;
+  baseUnit: string;
+}
+
+export async function getProductDetails(client: SapODataClient, config: SapConfig, product: string): Promise<ProductDetails> {
+  const header = await client.getAt<{ Product?: string; ProductGroup?: string; BaseUnit?: string; to_Description?: { results?: Array<{ ProductDescription?: string }> } }>(
+    config.services.product,
+    `/A_Product('${odataKey(product)}')`,
+    { "$select": "Product,ProductGroup,BaseUnit", "$expand": "to_Description" },
+  );
+  const description = header.data.to_Description?.results?.map(({ ProductDescription }) => ProductDescription?.trim())
+    .find((value): value is string => Boolean(value)) ?? header.data.Product ?? product;
+  return {
+    product: header.data.Product ?? product,
+    description,
+    productGroup: header.data.ProductGroup?.trim() || "UNCLASSIFIED",
+    baseUnit: header.data.BaseUnit?.trim() || "",
+  };
+}
+
 export async function getProduct(client: SapODataClient, config: SapConfig, product: string): Promise<unknown> {
   return (await client.getAt<unknown>(config.services.product, `/A_Product('${odataKey(product)}')`, {
     "$select": "Product,ProductType,ProductGroup,BaseUnit,Division,CreationDate,LastChangeDate,IsMarkedForDeletion",
