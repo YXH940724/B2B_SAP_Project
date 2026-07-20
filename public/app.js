@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const cart = [];
-const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material" };
+const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material", salesArea: null };
 let lastPreview = null;
 
 const authNote = (text) => { $("auth-message").textContent = text; };
@@ -54,7 +54,26 @@ function renderCustomer(profile) {
   });
   panel.append(element("hr"));
   panel.append(element("p", "eyebrow", "订购规则"));
-  panel.append(element("p", "sidebar-note", "仅展示 A305 / ZR01 当前有效价格物料。"));
+  panel.append(element("p", "sidebar-note", "仅展示 A305 / PR00 当前有效价格物料。"));
+}
+
+async function loadSalesAreas() {
+  const areas = await api("/api/sales-areas");
+  const select = $("sales-area-select");
+  select.replaceChildren();
+  if (!areas.length) throw new Error("当前客户未维护可用销售范围。");
+  areas.forEach((area) => {
+    const option = document.createElement("option");
+    option.value = area.key;
+    option.textContent = `${area.salesOrganization} / ${area.distributionChannel} / ${area.division}`;
+    option.dataset.salesOrganization = area.salesOrganization;
+    option.dataset.distributionChannel = area.distributionChannel;
+    option.dataset.division = area.division;
+    select.append(option);
+  });
+  const defaultArea = areas.find((area) => area.salesOrganization === "1310") || areas[0];
+  select.value = defaultArea.key;
+  catalogState.salesArea = defaultArea;
 }
 
 function renderGroups(groups) {
@@ -154,6 +173,10 @@ function renderCart() {
 async function loadCatalog(next = {}) {
   Object.assign(catalogState, next);
   const params = new URLSearchParams({ page: String(catalogState.page), pageSize: String(catalogState.pageSize), sort: catalogState.sort });
+  if (!catalogState.salesArea) throw new Error("请选择销售范围后再加载商品目录。");
+  params.set("salesOrganization", catalogState.salesArea.salesOrganization);
+  params.set("distributionChannel", catalogState.salesArea.distributionChannel);
+  params.set("division", catalogState.salesArea.division);
   if (catalogState.query) params.set("query", catalogState.query);
   if (catalogState.group) params.set("group", catalogState.group);
   portalNote("正在加载商品目录…");
@@ -180,6 +203,9 @@ function checkoutPayload() {
     requestedDeliveryDate: $("requested-delivery-date").value,
     purchaseOrderByCustomer: $("purchase-order-by-customer").value,
     note: $("portal-note").value,
+    salesOrganization: catalogState.salesArea?.salesOrganization,
+    distributionChannel: catalogState.salesArea?.distributionChannel,
+    division: catalogState.salesArea?.division,
   };
 }
 
@@ -206,6 +232,7 @@ $("login-form").addEventListener("submit", async (event) => {
     $("auth").hidden = true;
     $("portal").hidden = false;
     renderCustomer(profile);
+    await loadSalesAreas();
     await loadCatalog();
   } catch (error) { authNote(error.message); } finally { setBusy(button, false, "登录中…"); }
 });
@@ -238,6 +265,11 @@ $("register-verify-form").addEventListener("submit", async (event) => {
 
 $("catalog-search-form").addEventListener("submit", (event) => { event.preventDefault(); loadCatalog({ query: $("catalog-search").value.trim(), page: 1 }); });
 $("catalog-sort").addEventListener("change", () => loadCatalog({ sort: $("catalog-sort").value, page: 1 }));
+$("sales-area-select").addEventListener("change", () => {
+  const option = $("sales-area-select").selectedOptions[0];
+  catalogState.salesArea = option ? { salesOrganization: option.dataset.salesOrganization, distributionChannel: option.dataset.distributionChannel, division: option.dataset.division, key: option.value } : null;
+  loadCatalog({ page: 1, group: "" });
+});
 $("checkout-button").addEventListener("click", openCheckout);
 $("back-to-cart-button").addEventListener("click", () => { $("checkout").hidden = true; $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
 

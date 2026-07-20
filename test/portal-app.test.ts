@@ -129,6 +129,10 @@ test("rejects an invalid checkout delivery date before SAP pricing", async () =>
 
 test("serves the storefront navigation, catalog controls, cart and checkout fields", () => {
   const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
+  assert.match(html, /id="sales-area-select"/);
+  assert.match(script, /api\/sales-areas/);
+  assert.match(script, /salesOrganization/);
   assert.match(html, /id="catalog-search"/);
   assert.match(html, /id="material-groups"/);
   assert.match(html, /id="catalog-grid"/);

@@ -10,7 +10,7 @@
   <main>
     <section id="auth" class="auth-shell">
       <h1>SAP 客户订货商城</h1>
-      <p>登录后，仅可选择具有 A305 / ZR01 有效价格的物料。</p>
+      <p>登录后，仅可选择具有 A305 / PR00 有效价格的物料。</p>
       <div id="auth-message" role="alert" aria-live="polite"></div>
 
       <section id="login-panel">
@@ -61,7 +61,7 @@
         <section id="catalog" aria-label="商品目录">
           <div class="catalog-heading">
             <div><p class="eyebrow">商品目录</p><h1>有效价格物料</h1><p id="catalog-count">加载中…</p></div>
-            <label>排序<select id="catalog-sort"><option value="material">按物料号</option><option value="price">按价格</option></select></label>
+            <div class="catalog-filters"><label>销售范围<select id="sales-area-select" aria-label="销售范围"></select></label><label>排序<select id="catalog-sort"><option value="material">按物料号</option><option value="price">按价格</option></select></label></div>
           </div>
           <form id="catalog-search-form" class="catalog-search">
             <input id="catalog-search" type="search" placeholder="搜索物料号或物料描述" autocomplete="off">
