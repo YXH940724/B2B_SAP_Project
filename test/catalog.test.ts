@@ -206,3 +206,19 @@ test("temporarily scopes A305 catalog pricing to sales organization 1310 and PR0
   assert.match(String(calls[1]?.params?.["$filter"]), /ConditionType eq 'PR00'/);
   assert.match(String(calls[1]?.params?.["$filter"]), /SalesOrganization eq '1310'/);
 });
+
+test("accepts SAP price-validity customer numbers returned without leading zeroes", async () => {
+  const client = {
+    getAt: async (_service: string, path: string) => {
+      if (path === "/A_SlsPrcgConditionRecord") return { data: { results: [{ ConditionRecord: "0000000123", ConditionTable: "305", ConditionRateValue: "30.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "PC", ConditionIsDeleted: false }] } };
+      if (path === "/A_SlsPrcgCndnRecdValidity") return { data: { results: [{ Material: "000000000000001386", Customer: "100001", SalesOrganization: "1310", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
+      if (path === "/A_Product('000000000000001386')") return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+      throw new Error(`Unexpected request ${path}`);
+    },
+  };
+  const catalog = new CatalogService(client as never, config, () => new Date("2026-07-20T00:00:00Z"));
+
+  const page = await catalog.list("0000100001", { salesOrganization: "1310", distributionChannel: "10", division: "00", key: "1310/10/00" }, { page: 1, pageSize: 20, sort: "material" });
+
+  assert.equal(page.total, 1);
+});

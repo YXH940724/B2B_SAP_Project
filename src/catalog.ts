@@ -199,7 +199,7 @@ function priceFilter(customer: string, salesArea: SalesArea, material?: string):
 }
 
 function matchesScope(row: PriceValidity, customer: string, salesArea: SalesArea): boolean {
-  return row.Customer === customer
+  return normalizeCustomer(row.Customer ?? "") === customer
     && row.SalesOrganization === salesArea.salesOrganization
     && row.DistributionChannel === salesArea.distributionChannel;
 }
