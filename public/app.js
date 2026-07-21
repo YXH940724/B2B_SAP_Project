@@ -246,7 +246,7 @@ function renderOrderRows(host, orders, emptyText) {
 function renderOrderDashboard(history) {
   const summary = $("order-dashboard-summary");
   summary.replaceChildren();
-  const cards = [["订单总数", String(history.dashboard.orderCount)], ["订单金额", `${history.dashboard.currency || ""} ${Number(history.dashboard.totalAmount || 0).toFixed(2)}`.trim()], ["SAP 历史", String(history.sapOrders.length)], ["门户同步", String(history.portalOrders.length)]];
+  const cards = [["订单总数", String(history.dashboard.orderCount)], ["订单金额", `${history.dashboard.currency || ""} ${Number(history.dashboard.totalAmount || 0).toFixed(2)}`.trim()], ["SAP 销售订单", String(history.sapOrders.length)]];
   cards.forEach(([label, value]) => {
     const card = element("article", "dashboard-card");
     card.append(element("span", "", label), element("strong", "", value));
@@ -255,8 +255,7 @@ function renderOrderDashboard(history) {
   const monthly = element("div", "dashboard-months");
   (history.dashboard.months || []).forEach((month) => monthly.append(element("span", "", `${month.month}: ${month.orderCount} 单`)));
   summary.append(monthly);
-  renderOrderRows($("sap-orders-list"), history.sapOrders, "近 12 个月没有 SAP 历史订单。");
-  renderOrderRows($("portal-orders-list"), history.portalOrders, "近 12 个月没有门户同步订单。");
+  renderOrderRows($("sap-orders-list"), history.sapOrders, "近 12 个月没有 SAP 销售订单。");
 }
 
 async function loadOrderCenter() {

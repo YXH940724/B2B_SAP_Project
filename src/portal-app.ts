@@ -9,7 +9,7 @@ import { getSellableOffer } from "./portal.js";
 import { assertWriteAllowed, createPayload, PortalCheckoutSchema } from "./sales-orders.js";
 import type { SalesArea } from "./sales-areas.js";
 import type { Customer360Profile } from "./customer-360.js";
-import type { CustomerOrderHistory, PortalOrderSubmission } from "./order-history.js";
+import type { CustomerOrderHistory } from "./order-history.js";
 import type { VerificationDelivery } from "./verification-delivery.js";
 
 export interface PortalDependencies {
@@ -21,7 +21,7 @@ export interface PortalDependencies {
   salesAreas?: { list(customer: string): Promise<SalesArea[]> };
   customer?: { get(customer: string): Promise<{ customer: string; name: string; accountGroup: string; businessPartner: string }> };
   customer360?: { get(customer: string): Promise<Customer360Profile> };
-  orderHistory?: { list(customer: string): Promise<CustomerOrderHistory>; recordPortalSubmission?(submission: PortalOrderSubmission): void };
+  orderHistory?: { list(customer: string): Promise<CustomerOrderHistory> };
   staticRoot?: string;
   production?: boolean;
 }
@@ -248,18 +248,12 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
       if (req.body?.confirm !== true) throw new Error("请确认订单后再同步 SAP。");
       const preview = await Promise.all((req.body?.items ?? []).map(async (item: { product: string; quantity: number; plant?: string }) => {
         const offer = await getSellableOffer(client, config, customer, salesArea, item.product);
-        return { material: item.product, requested_quantity: Number(item.quantity), requested_quantity_unit: offer.priceUnit || "PC", plant: item.plant, lineTotal: Number(offer.unitPrice) * Number(item.quantity), currency: offer.currency };
+        return { material: item.product, requested_quantity: Number(item.quantity), requested_quantity_unit: offer.priceUnit || "PC", plant: item.plant };
       }));
       if (!preview.length) throw new Error("订单没有项目。");
       assertWriteAllowed(config, "CREATE_SALES_ORDER", "CREATE_SALES_ORDER");
-      const payload = createPayload({ sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR", sales_organization: salesArea.salesOrganization, distribution_channel: salesArea.distributionChannel, organization_division: salesArea.division, sold_to_party: customer, ...checkout, items: preview.map(({ lineTotal: _lineTotal, currency: _currency, ...item }) => item), dry_run: false, confirm: "CREATE_SALES_ORDER", response_format: "json" });
+      const payload = createPayload({ sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR", sales_organization: salesArea.salesOrganization, distribution_channel: salesArea.distributionChannel, organization_division: salesArea.division, sold_to_party: customer, ...checkout, items: preview, dry_run: false, confirm: "CREATE_SALES_ORDER", response_format: "json" });
       const created = await client.write<unknown>("post", "/A_SalesOrder", payload);
-      const createdOrder = created.data as { SalesOrder?: unknown } | undefined;
-      const salesOrder = typeof createdOrder?.SalesOrder === "string" ? createdOrder.SalesOrder : "待 SAP 返回订单号";
-      orderHistoryDependencies().recordPortalSubmission?.({
-        customer, salesOrder, createdAt: new Date().toISOString().slice(0, 10), salesOrganization: salesArea.salesOrganization,
-        total: preview.reduce((sum, item) => sum + item.lineTotal, 0), currency: preview.find((item) => item.currency)?.currency || "", status: "已同步",
-      });
       res.json({ success: true, salesOrder: created.data });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }
   });

@@ -11,11 +11,7 @@ export interface OrderHistoryItem {
   total: number;
   currency: string;
   status: string;
-  source: "sap" | "portal";
-}
-
-export interface PortalOrderSubmission extends Omit<OrderHistoryItem, "source"> {
-  customer: string;
+  source: "sap";
 }
 
 export interface OrderDashboard {
@@ -27,7 +23,6 @@ export interface OrderDashboard {
 
 export interface CustomerOrderHistory {
   sapOrders: OrderHistoryItem[];
-  portalOrders: OrderHistoryItem[];
   dashboard: OrderDashboard;
 }
 
@@ -62,13 +57,7 @@ function twelveMonths(now: Date): string[] {
 }
 
 export class OrderHistoryService {
-  private readonly submissions: PortalOrderSubmission[] = [];
-
   constructor(private readonly client: ODataReader, private readonly now: () => Date = () => new Date()) {}
-
-  recordPortalSubmission(submission: PortalOrderSubmission): void {
-    this.submissions.unshift({ ...submission, customer: normalizeCustomer(submission.customer) });
-  }
 
   async list(customerInput: string): Promise<CustomerOrderHistory> {
     const customer = normalizeCustomer(customerInput);
@@ -79,6 +68,10 @@ export class OrderHistoryService {
       "$top": 200,
     });
     const sapOrders = rows(response.data)
+      .filter((row) => {
+        const soldToParty = text(row.SoldToParty);
+        return Boolean(soldToParty) && normalizeCustomer(soldToParty) === customer;
+      })
       .map((row): OrderHistoryItem => ({
         salesOrder: text(row.SalesOrder),
         createdAt: createdAt(row.CreationDate),
@@ -89,10 +82,7 @@ export class OrderHistoryService {
         source: "sap",
       }))
       .filter((item) => item.salesOrder && item.createdAt >= `${start}-01`);
-    const portalOrders = this.submissions
-      .filter((item) => item.customer === customer && item.createdAt >= `${start}-01`)
-      .map(({ customer: _customer, ...item }) => ({ ...item, source: "portal" as const }));
-    return { sapOrders, portalOrders, dashboard: this.dashboard([...sapOrders, ...portalOrders]) };
+    return { sapOrders, dashboard: this.dashboard(sapOrders) };
   }
 
   private dashboard(orders: OrderHistoryItem[]): OrderDashboard {

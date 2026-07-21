@@ -37,8 +37,7 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
     customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
     orderHistory: { list: async (customer: string) => ({
       sapOrders: [{ salesOrder: "0000001372", createdAt: "2026-07-01", salesOrganization: "1310", total: 100, currency: "CNY", status: "A", source: "sap" }],
-      portalOrders: [{ salesOrder: "0000002001", createdAt: "2026-07-02", salesOrganization: "1310", total: 50, currency: "CNY", status: "已同步", source: "portal" }],
-      dashboard: { orderCount: customer === "0000100001" ? 2 : 0, totalAmount: 150, currency: "CNY", months: [] },
+      dashboard: { orderCount: customer === "0000100001" ? 1 : 0, totalAmount: 100, currency: "CNY", months: [] },
     }) },
   });
   return { app, getCode: () => code };
@@ -133,12 +132,12 @@ test("rejects an invalid checkout delivery date before SAP pricing", async () =>
   assert.match(response.body.error, /期望交货日期/);
 });
 
-test("returns both SAP and portal orders with a session-protected dashboard", async () => {
+test("returns only SAP orders from the session-bound order history", async () => {
   const agent = await registeredAgent(makeStorefrontApp);
   const response = await agent.get("/api/orders/history").expect(200);
   assert.equal(response.body.sapOrders[0].salesOrder, "0000001372");
-  assert.equal(response.body.portalOrders[0].salesOrder, "0000002001");
-  assert.equal(response.body.dashboard.totalAmount, 150);
+  assert.equal(response.body.portalOrders, undefined);
+  assert.equal(response.body.dashboard.totalAmount, 100);
   await request(makeStorefrontApp().app).get("/api/orders/history").expect(401);
 });
 
@@ -171,13 +170,13 @@ test("serves independent order-entry and customer-360 views", () => {
   assert.match(script, /api\/customer-360/);
 });
 
-test("serves an order-center dashboard for SAP and portal order sources", () => {
+test("serves an SAP-only order center", () => {
   const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
   assert.match(html, /id="view-orders"/);
   assert.match(html, /id="order-dashboard-summary"/);
   assert.match(html, /id="sap-orders-list"/);
-  assert.match(html, /id="portal-orders-list"/);
+  assert.doesNotMatch(html, /id="portal-orders-list"/);
   assert.match(script, /api\/orders\/history/);
   assert.match(script, /function renderOrderDashboard/);
 });
