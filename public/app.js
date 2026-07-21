@@ -1,9 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const cart = [];
 let customerSalesAreas = [];
-const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material", salesArea: null };
+const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material", language: "ZH", salesArea: null };
 const orderState = { page: 1, pageSize: 20, from: "", to: "", salesArea: "", overallStatus: "", deliveryStatus: "", query: "", sort: "createdAt:desc" };
 let lastPreview = null;
+let lastOrderDetail = null;
 
 const authNote = (text) => { $("auth-message").textContent = text; };
 const portalNote = (text) => { $("portal-message").textContent = text; };
@@ -198,31 +199,121 @@ function showView(name) {
   Object.entries(views).forEach(([viewName, id]) => { $(id).hidden = viewName !== name; });
 }
 
-function renderOrderEntry() {
+function inputCell(value, placeholder, onChange, maxLength) {
+  const input = document.createElement("input");
+  input.value = value || "";
+  input.placeholder = placeholder;
+  if (maxLength) input.maxLength = maxLength;
+  input.addEventListener("change", () => onChange(input.value.trim()));
+  return input;
+}
+
+function selectCell(options, selected, onChange, emptyLabel) {
+  const select = document.createElement("select");
+  if (emptyLabel) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = emptyLabel;
+    select.append(empty);
+  }
+  options.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.append(option);
+  });
+  select.value = selected || "";
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+async function loadOrderDefaults(group) {
+  const area = group.salesArea;
+  const params = new URLSearchParams({ salesOrganization: area.salesOrganization, distributionChannel: area.distributionChannel, division: area.division });
+  return api(`/api/order-defaults?${params}`);
+}
+
+async function loadFulfillmentOptions(item) {
+  if (item.fulfillment) return item.fulfillment;
+  item.fulfillment = await api(`/api/products/${encodeURIComponent(item.product)}/fulfillment`);
+  if (!item.productionPlant) item.productionPlant = item.fulfillment.defaultPlant || "";
+  const locations = item.fulfillment.storageLocationsByPlant?.[item.productionPlant] || [];
+  if (!item.storageLocation && locations.length === 1) item.storageLocation = locations[0];
+  return item.fulfillment;
+}
+
+function renderOrderWorkbenchTotals() {
+  const host = $("order-workbench-totals");
+  host.replaceChildren();
+  groupCartBySalesArea().forEach((group) => {
+    const total = group.items.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity, 0);
+    const row = element("p", "summary-total-row");
+    row.append(element("span", "", salesAreaLabel(group.salesArea)), element("strong", "", formatMoney(group.items[0]?.currency, total)));
+    host.append(row);
+  });
+}
+
+async function renderOrderEntry() {
   const host = $("order-entry-groups");
   host.replaceChildren();
   if (!cart.length) {
     host.append(element("p", "empty-state", "购物车为空，请先选择商品。"));
     return;
   }
-  groupCartBySalesArea().forEach((group) => {
+  const groups = groupCartBySalesArea();
+  host.append(element("p", "empty-state", "正在读取 SAP 客户条款与物料履约主数据…"));
+  try {
+    const defaults = await Promise.all(groups.map((group) => loadOrderDefaults(group)));
+    const allItems = groups.flatMap((group) => group.items);
+    await Promise.all(allItems.map((item) => loadFulfillmentOptions(item)));
+    const first = defaults[0] || {};
+    if (!$("customer-payment-terms").value) $("customer-payment-terms").value = first.paymentTerms || "";
+    if (!$("incoterms-classification").value) $("incoterms-classification").value = first.incotermsClassification || "";
+    if (!$("incoterms-version").value) $("incoterms-version").value = first.incotermsVersion || "";
+    if (!$("incoterms-location").value) $("incoterms-location").value = first.incotermsLocation || "";
+  } catch (error) {
+    portalNote(`订单主数据读取失败：${error.message}`);
+  }
+  host.replaceChildren();
+  groups.forEach((group) => {
     const section = element("section", "sales-order-group");
     section.append(element("p", "eyebrow", "销售订单组"), element("h3", "", salesAreaLabel(group.salesArea)));
     const header = element("dl", "order-header-grid");
     [["订单类型", "OR"], ["售达方", "当前登录客户"], ["销售范围", salesAreaLabel(group.salesArea)], ["行项目", `${group.items.length} 行`]].forEach(([label, value]) => header.append(element("dt", "", label), element("dd", "", value)));
     const table = document.createElement("table");
     table.className = "order-lines-table";
-    table.innerHTML = "<thead><tr><th>物料号</th><th>物料描述</th><th>数量</th><th>单位</th><th>单价</th><th>行金额</th></tr></thead>";
+    table.innerHTML = "<thead><tr><th>物料号 / 描述</th><th>数量</th><th>客户料号</th><th>工厂</th><th>库位</th><th>单价</th><th>税务预览</th><th>行金额</th></tr></thead>";
     const body = document.createElement("tbody");
     group.items.forEach((item) => {
       const row = document.createElement("tr");
-      [item.product.replace(/^0+/, "") || item.product, item.description || "SAP 未维护描述", String(item.quantity), item.priceUnit || item.baseUnit || "SAP 未维护", `${item.currency || ""} ${Number(item.unitPrice).toFixed(2)}`, `${item.currency || ""} ${(Number(item.unitPrice) * item.quantity).toFixed(2)}`].forEach((value) => row.append(element("td", "", value.trim())));
+      const material = element("td", "order-material-cell");
+      material.append(element("strong", "", item.product.replace(/^0+/, "") || item.product), element("span", "", item.description || "SAP 未维护描述"));
+      row.append(material);
+      row.append(element("td", "", `${item.quantity} ${item.priceUnit || item.baseUnit || "—"}`));
+      const customerMaterial = document.createElement("td");
+      customerMaterial.append(inputCell(item.customerMaterial, "选填", (value) => { item.customerMaterial = value; }, 35));
+      row.append(customerMaterial);
+      const fulfillment = item.fulfillment || { plants: [], storageLocationsByPlant: {} };
+      const plant = document.createElement("td");
+      plant.append(selectCell(fulfillment.plants || [], item.productionPlant, (value) => { item.productionPlant = value; item.storageLocation = ""; renderOrderEntry(); }, "选择工厂"));
+      row.append(plant);
+      const locations = fulfillment.storageLocationsByPlant?.[item.productionPlant] || [];
+      const storage = document.createElement("td");
+      if (locations.length) storage.append(selectCell(locations, item.storageLocation, (value) => { item.storageLocation = value; }, "选择库位"));
+      else storage.append(element("span", "muted", "SAP 未维护"));
+      row.append(storage);
+      row.append(element("td", "", `${item.currency || ""} ${Number(item.unitPrice).toFixed(2)}`.trim()));
+      const tax = element("td", "tax-preview-cell");
+      tax.append(element("strong", "", "SAP 定价后确认"), element("span", "", "税率 / 税额"));
+      row.append(tax);
+      row.append(element("td", "", `${item.currency || ""} ${(Number(item.unitPrice) * item.quantity).toFixed(2)}`.trim()));
       body.append(row);
     });
     table.append(body);
     section.append(header, table, element("p", "group-total", `本组金额 ${group.items[0]?.currency || "¥"}${group.items.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity, 0).toFixed(2)}`));
     host.append(section);
   });
+  renderOrderWorkbenchTotals();
 }
 
 function appendCustomerGroup(host, title, values, formatter) {
@@ -418,7 +509,8 @@ function renderOrderDetail(data) {
   summary.append(element("p", "eyebrow", "SAP 销售订单"), element("h3", "", `订单 ${unmaintained(header.salesOrder).replace(/^0+/, "") || unmaintained(header.salesOrder)}`));
   const fields = [
     ["创建日期", header.createdAt], ["销售组织", header.salesOrganization], ["分销渠道", header.distributionChannel], ["产品组", header.division],
-    ["客户采购订单号", header.purchaseOrderByCustomer], ["期望交货日期", header.requestedDeliveryDate], ["客户采购订单日期", header.customerPurchaseOrderDate], ["创建人", header.createdByUser],
+    ["客户采购订单号", header.purchaseOrderByCustomer], ["期望交货日期", header.requestedDeliveryDate], ["付款条款", header.paymentTerms], ["贸易术语", header.incotermsClassification],
+    ["贸易术语版本", header.incotermsVersion], ["贸易地点", header.incotermsLocation], ["客户采购订单日期", header.customerPurchaseOrderDate], ["创建人", header.createdByUser],
   ];
   const details = element("dl", "order-detail-fields");
   fields.forEach(([label, value]) => details.append(element("dt", "", label), element("dd", "", unmaintained(value))));
@@ -439,11 +531,15 @@ function renderOrderDetail(data) {
     return;
   }
   const table = document.createElement("table");
-  table.innerHTML = "<thead><tr><th>项目</th><th>物料</th><th>描述</th><th>数量</th><th>净价</th><th>净额</th><th>交货状态</th></tr></thead>";
+  table.innerHTML = "<thead><tr><th>项目</th><th>物料 / 描述</th><th>客户料号</th><th>数量</th><th>工厂 / 库位</th><th>净价</th><th>税率 / 税额</th><th>净额</th><th>交货状态</th></tr></thead>";
   const body = document.createElement("tbody");
   items.forEach((item) => {
     const row = document.createElement("tr");
-    [unmaintained(item.item), unmaintained(item.material), unmaintained(item.description), `${unmaintained(item.quantity)} ${item.unit || "SAP 未维护"}`, formatMoney(item.currency, item.netPrice), formatMoney(item.currency, item.netAmount)].forEach((value) => row.append(element("td", "", value)));
+    const material = element("td", "order-material-cell");
+    material.append(element("strong", "", unmaintained(item.material)), element("span", "", unmaintained(item.description)));
+    row.append(element("td", "", unmaintained(item.item)), material, element("td", "", unmaintained(item.customerMaterial)), element("td", "", `${unmaintained(item.quantity)} ${item.unit || "SAP 未维护"}`), element("td", "", [item.productionPlant, item.storageLocation].filter(Boolean).join(" / ") || "SAP 未维护"), element("td", "", formatMoney(item.currency, item.netPrice)));
+    row.append(element("td", "", item.taxRate === null || item.taxRate === undefined ? "SAP 定价后确认" : `${item.taxRate}% / ${formatMoney(item.currency, item.taxAmount)}`));
+    row.append(element("td", "", formatMoney(item.currency, item.netAmount)));
     const delivery = element("td");
     delivery.append(statusBadge(item.deliveryStatus));
     row.append(delivery);
@@ -451,6 +547,25 @@ function renderOrderDetail(data) {
   });
   table.append(body);
   lines.append(table);
+}
+
+function renderPrintPreview(data) {
+  const host = $("print-preview-content");
+  host.replaceChildren();
+  const header = data?.header || {};
+  host.append(element("p", "eyebrow", "SAP 客户订货商城"), element("h1", "", `销售订单 ${unmaintained(header.salesOrder).replace(/^0+/, "") || unmaintained(header.salesOrder)}`));
+  const metadata = element("dl", "print-metadata");
+  [["客户采购订单号", header.purchaseOrderByCustomer], ["销售范围", salesAreaLabel(header)], ["付款条款", header.paymentTerms], ["贸易术语", [header.incotermsClassification, header.incotermsVersion, header.incotermsLocation].filter(Boolean).join(" / ")], ["期望交货", header.requestedDeliveryDate]].forEach(([label, value]) => metadata.append(element("dt", "", label), element("dd", "", unmaintained(value))));
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>项目</th><th>物料</th><th>描述</th><th>数量</th><th>净额</th></tr></thead>";
+  const body = document.createElement("tbody");
+  (data?.items || []).forEach((item) => {
+    const row = document.createElement("tr");
+    [unmaintained(item.item), unmaintained(item.material), unmaintained(item.description), `${unmaintained(item.quantity)} ${item.unit || "—"}`, formatMoney(item.currency, item.netAmount)].forEach((value) => row.append(element("td", "", value)));
+    body.append(row);
+  });
+  table.append(body);
+  host.append(metadata, table, element("p", "print-total", `订单金额：${formatMoney(header.currency, header.total)}`));
 }
 
 function renderOrderWorkbench(data) {
@@ -469,7 +584,8 @@ async function openOrderDetail(salesOrder) {
   if (!dialog.open) dialog.showModal();
   try {
     salesOrder = encodeURIComponent(salesOrder);
-    renderOrderDetail(await api(`/api/orders/${salesOrder}`));
+    lastOrderDetail = await api(`/api/orders/${salesOrder}`);
+    renderOrderDetail(lastOrderDetail);
   } catch (error) { $("order-detail-header").textContent = error.message; }
 }
 
@@ -502,6 +618,7 @@ async function loadCatalog(next = {}) {
   params.set("salesOrganization", catalogState.salesArea.salesOrganization);
   params.set("distributionChannel", catalogState.salesArea.distributionChannel);
   params.set("division", catalogState.salesArea.division);
+  params.set("language", catalogState.language || "ZH");
   if (catalogState.query) params.set("query", catalogState.query);
   if (catalogState.group) params.set("group", catalogState.group);
   portalNote("正在加载商品目录…");
@@ -518,17 +635,21 @@ async function loadCatalog(next = {}) {
 
 async function openCheckout() {
   if (!cart.length) return;
-  renderOrderEntry();
+  await renderOrderEntry();
   showView("orderEntry");
   $("view-order-entry").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function checkoutPayload() {
   return {
-    items: cart.map((item) => ({ product: item.product, quantity: item.quantity, salesOrganization: item.salesArea?.salesOrganization, distributionChannel: item.salesArea?.distributionChannel, division: item.salesArea?.division })),
+    items: cart.map((item) => ({ product: item.product, quantity: item.quantity, customerMaterial: item.customerMaterial, productionPlant: item.productionPlant, storageLocation: item.storageLocation, salesOrganization: item.salesArea?.salesOrganization, distributionChannel: item.salesArea?.distributionChannel, division: item.salesArea?.division })),
     requestedDeliveryDate: $("requested-delivery-date").value,
     purchaseOrderByCustomer: $("purchase-order-by-customer").value,
     note: $("portal-note").value,
+    customerPaymentTerms: $("customer-payment-terms").value,
+    incotermsClassification: $("incoterms-classification").value,
+    incotermsVersion: $("incoterms-version").value,
+    incotermsLocation: $("incoterms-location").value,
   };
 }
 
@@ -594,6 +715,7 @@ $("register-verify-form").addEventListener("submit", async (event) => {
 
 $("catalog-search-form").addEventListener("submit", (event) => { event.preventDefault(); loadCatalog({ query: $("catalog-search").value.trim(), page: 1 }); });
 $("catalog-sort").addEventListener("change", () => loadCatalog({ sort: $("catalog-sort").value, page: 1 }));
+$("catalog-language").addEventListener("change", () => loadCatalog({ language: $("catalog-language").value, page: 1 }));
 $("sales-area-select").addEventListener("change", () => {
   const option = $("sales-area-select").selectedOptions[0];
   catalogState.salesArea = option ? { salesOrganization: option.dataset.salesOrganization, distributionChannel: option.dataset.distributionChannel, division: option.dataset.division, key: option.value } : null;
@@ -613,6 +735,13 @@ $("order-filter-form").addEventListener("submit", (event) => {
   });
 });
 $("close-order-detail").addEventListener("click", () => $("order-detail-dialog").close());
+$("print-order-detail").addEventListener("click", () => {
+  if (!lastOrderDetail) return;
+  renderPrintPreview(lastOrderDetail);
+  if (!$("print-preview").open) $("print-preview").showModal();
+});
+$("close-print-preview").addEventListener("click", () => $("print-preview").close());
+$("print-preview-button").addEventListener("click", () => window.print());
 $("checkout-button").addEventListener("click", openCheckout);
 $("back-to-cart-button").addEventListener("click", () => { showView("catalog"); $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
 
@@ -636,8 +765,6 @@ $("confirm-order-button").addEventListener("click", async () => {
     const successful = (data.groups || []).filter((group) => group.success);
     const failed = (data.groups || []).filter((group) => !group.success);
     portalNote(`SAP 已创建 ${successful.length} 张订单${failed.length ? `；${failed.length} 个销售范围未创建，请修正后重试。` : "。"}`);
-    const successfulKeys = new Set(successful.map((group) => group.salesArea?.key));
-    if (successfulKeys.size) cart.splice(0, cart.length, ...cart.filter((item) => !successfulKeys.has(item.salesArea?.key)));
     lastPreview = null;
     showView("catalog");
     renderCart();
