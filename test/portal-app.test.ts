@@ -5,6 +5,7 @@ import test from "node:test";
 import request from "supertest";
 import { AuthService } from "../src/auth-service.js";
 import { createAuthStore } from "../src/auth-store.js";
+import { OrderHistoryError } from "../src/order-history.js";
 import { createPortalApp } from "../src/portal-app.js";
 
 function makeApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string } {
@@ -35,10 +36,40 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
       };
     } },
     customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
-    orderHistory: { list: async (customer: string) => ({
-      sapOrders: [{ salesOrder: "0000001372", createdAt: "2026-07-01", salesOrganization: "1310", total: 100, currency: "CNY", status: "A", source: "sap" }],
-      dashboard: { orderCount: customer === "0000100001" ? 1 : 0, totalAmount: 100, currency: "CNY", months: [] },
-    }) },
+    orderHistory: {
+      list: async (customer: string, query) => ({
+        items: [{
+          salesOrder: "0000001372", salesOrderType: "OR", createdAt: "2026-07-01", salesOrganization: query?.salesOrganization ?? "1310",
+          distributionChannel: "10", division: "00", purchaseOrderByCustomer: "PO-1", total: 100, currency: "CNY",
+          overallStatus: { code: "A", label: "未处理", tone: "neutral" },
+          deliveryStatus: { code: "A", label: "未处理", tone: "neutral" },
+          billingStatus: { code: "A", label: "未处理", tone: "neutral" },
+        }],
+        page: query?.page ?? 1,
+        pageSize: query?.pageSize ?? 20,
+        total: customer === "0000100001" ? 1 : 0,
+        pageCount: 1,
+        dashboard: {
+          orderCount: customer === "0000100001" ? 1 : 0,
+          totalsByCurrency: [{ currency: "CNY", orderCount: 1, totalAmount: 100, averageAmount: 100 }],
+          totalAmount: 100, averageAmount: 100, currency: "CNY", inFulfillmentCount: 0, months: [], statuses: [],
+        },
+        insights: { topSalesOrganizations: [], largestOrder: null, latestOrderDate: "2026-07-01", attentionCount: 1 },
+      }),
+      detail: async (customer: string, salesOrder: string) => {
+        assert.equal(customer, "0000100001");
+        if (salesOrder === "0000009999") throw new OrderHistoryError("ORDER_NOT_FOUND", 404, "订单不存在。");
+        return {
+          header: {
+            salesOrder, salesOrderType: "OR", createdAt: "2026-07-01", salesOrganization: "1310", distributionChannel: "10", division: "00",
+            purchaseOrderByCustomer: "PO-1", total: 100, currency: "CNY", overallStatus: { code: "A", label: "未处理", tone: "neutral" },
+            deliveryStatus: { code: "A", label: "未处理", tone: "neutral" }, billingStatus: { code: "A", label: "未处理", tone: "neutral" },
+            requestedDeliveryDate: null, customerPurchaseOrderDate: null, createdByUser: null,
+          },
+          items: [],
+        };
+      },
+    },
   });
   return { app, getCode: () => code };
 }
@@ -132,13 +163,22 @@ test("rejects an invalid checkout delivery date before SAP pricing", async () =>
   assert.match(response.body.error, /期望交货日期/);
 });
 
-test("returns only SAP orders from the session-bound order history", async () => {
+test("uses only the cookie session customer for filtered order history", async () => {
   const agent = await registeredAgent(makeStorefrontApp);
-  const response = await agent.get("/api/orders/history").expect(200);
-  assert.equal(response.body.sapOrders[0].salesOrder, "0000001372");
-  assert.equal(response.body.portalOrders, undefined);
+  const response = await agent.get("/api/orders/history?page=1&pageSize=10&salesOrganization=1310&customer=0000000002").expect(200);
+  assert.equal(response.body.items[0].salesOrder, "0000001372");
+  assert.equal(response.body.total, 1);
+  assert.equal(response.body.page, 1);
+  assert.equal(response.body.pageSize, 10);
   assert.equal(response.body.dashboard.totalAmount, 100);
+  assert.deepEqual(response.body.dashboard.totalsByCurrency, [{ currency: "CNY", orderCount: 1, totalAmount: 100, averageAmount: 100 }]);
   await request(makeStorefrontApp().app).get("/api/orders/history").expect(401);
+});
+
+test("returns 404 when the selected sales order is not owned by the logged-in customer", async () => {
+  const agent = await registeredAgent(makeStorefrontApp);
+  const response = await agent.get("/api/orders/0000009999").expect(404);
+  assert.equal(response.body.error, "订单不存在。");
 });
 
 test("serves the storefront navigation, catalog controls, cart and checkout fields", () => {
