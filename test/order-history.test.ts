@@ -2,24 +2,62 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { OrderHistoryService } from "../src/order-history.js";
 
-test("reads only SAP orders for the normalized customer and calculates a twelve-month dashboard", async () => {
-  const calls: Array<Record<string, string | number | undefined>> = [];
-  const service = new OrderHistoryService({
-    get: async (_path, params) => {
-      calls.push(params ?? {});
-      return { data: { results: [
-        { SalesOrder: "0000001372", CreationDate: "2026-06-15", SoldToParty: "0000100001", TotalNetAmount: "120.00", TransactionCurrency: "CNY", OverallSDProcessStatus: "A", SalesOrganization: "1310" },
-        { SalesOrder: "0000001373", CreationDate: "2026-06-16", SoldToParty: "0000100002", TotalNetAmount: "999.00", TransactionCurrency: "CNY", OverallSDProcessStatus: "A", SalesOrganization: "1310" },
-      ] } };
+function fakeSapOrders() {
+  const calls: Array<{ path: string; params?: Record<string, string | number | undefined> }> = [];
+  const ownOrders = Array.from({ length: 11 }, (_, index) => ({
+    SalesOrder: String(1372 + index).padStart(10, "0"),
+    SalesOrderType: "OR",
+    CreationDate: `2026-07-${String(index + 1).padStart(2, "0")}`,
+    SoldToParty: "0000100001",
+    SalesOrganization: "1310",
+    DistributionChannel: "10",
+    OrganizationDivision: "00",
+    PurchaseOrderByCustomer: `PO-${index + 1}`,
+    TotalNetAmount: String((index + 1) * 100),
+    TransactionCurrency: "CNY",
+    OverallSDProcessStatus: index === 0 ? "B" : "A",
+    OverallDeliveryStatus: index === 0 ? "B" : "A",
+    OverallOrdReltdBillgStatus: "A",
+  }));
+  return {
+    calls,
+    get: async (path: string, params?: Record<string, string | number | undefined>) => {
+      calls.push({ path, params });
+      return { data: { results: [...ownOrders, {
+        SalesOrder: "0000009999", CreationDate: "2026-07-20", SoldToParty: "0000100002", SalesOrganization: "1310",
+        TotalNetAmount: "9999", TransactionCurrency: "CNY", OverallSDProcessStatus: "C",
+      }] } };
     },
-  }, () => new Date("2026-07-21T00:00:00.000Z"));
+  };
+}
 
-  const history = await service.list("100001");
+function fakeForeignOrderDetail() {
+  return {
+    get: async (path: string) => {
+      assert.equal(path, "/A_SalesOrder('0000001372')");
+      return { data: { SalesOrder: "0000001372", SoldToParty: "0000100002" } };
+    },
+  };
+}
 
-  assert.match(String(calls[0].$filter), /0000100001/);
-  assert.equal(history.sapOrders.length, 1);
-  assert.equal("portalOrders" in history, false);
-  assert.equal(history.dashboard.orderCount, 1);
-  assert.equal(history.dashboard.totalAmount, 120);
-  assert.equal(history.dashboard.months.at(-1)?.month, "2026-07");
+test("filters only the logged-in customer's orders and paginates the mapped SAP rows", async () => {
+  const client = fakeSapOrders();
+  const service = new OrderHistoryService(client, () => new Date("2026-07-21T00:00:00.000Z"));
+
+  const result = await service.list("100001", { page: 2, pageSize: 10, salesOrganization: "1310", sort: "total:desc" });
+
+  assert.match(String(client.calls[0].params?.$filter), /0000100001/);
+  assert.equal(result.page, 2);
+  assert.equal(result.pageSize, 10);
+  assert.equal(result.total, 11);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].salesOrganization, "1310");
+  assert.equal(result.dashboard.orderCount, 11);
+  assert.equal(result.insights.topSalesOrganizations[0].salesOrganization, "1310");
+});
+
+test("rejects an order detail whose SAP sold-to party differs from the session customer", async () => {
+  const service = new OrderHistoryService(fakeForeignOrderDetail());
+
+  await assert.rejects(() => service.detail("100001", "1372"), /订单不存在/);
 });
