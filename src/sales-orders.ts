@@ -9,13 +9,19 @@ const ItemSchema = z.object({
   material: z.string().min(1).max(40),
   requested_quantity: z.number().positive(),
   requested_quantity_unit: z.string().min(1).max(3),
-  plant: z.string().min(1).max(4).optional(),
+  customer_material: z.string().trim().min(1).max(35).optional(),
+  production_plant: z.string().min(1).max(4).optional(),
+  storage_location: z.string().min(1).max(4).optional(),
 }).strict();
 
 export const PortalCheckoutSchema = z.object({
   requested_delivery_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   purchase_order_by_customer: z.string().trim().min(1).max(35).optional(),
   portal_note: z.string().trim().max(500).optional(),
+  customer_payment_terms: z.string().trim().min(1).max(4).optional(),
+  incoterms_classification: z.string().trim().min(1).max(3).optional(),
+  incoterms_version: z.string().trim().min(1).max(4).optional(),
+  incoterms_location: z.string().trim().min(1).max(70).optional(),
 }).strict();
 
 export const CreateSalesOrderSchema = z.object({
@@ -59,11 +65,17 @@ export function createPayload(input: CreateSalesOrderInput): Record<string, unkn
     SoldToParty: input.sold_to_party,
     ...(input.purchase_order_by_customer ? { PurchaseOrderByCustomer: input.purchase_order_by_customer } : {}),
     ...(input.requested_delivery_date ? { RequestedDeliveryDate: `${input.requested_delivery_date}T00:00:00` } : {}),
+    ...(input.customer_payment_terms ? { CustomerPaymentTerms: input.customer_payment_terms } : {}),
+    ...(input.incoterms_classification ? { IncotermsClassification: input.incoterms_classification } : {}),
+    ...(input.incoterms_version ? { IncotermsVersion: input.incoterms_version } : {}),
+    ...(input.incoterms_location ? { IncotermsTransferLocation: input.incoterms_location } : {}),
     to_Item: { results: input.items.map((item) => ({
       Material: item.material,
       RequestedQuantity: String(item.requested_quantity),
       RequestedQuantityUnit: item.requested_quantity_unit,
-      ...(item.plant ? { Plant: item.plant } : {}),
+      ...(item.customer_material ? { MaterialByCustomer: item.customer_material } : {}),
+      ...(item.production_plant ? { ProductionPlant: item.production_plant } : {}),
+      ...(item.storage_location ? { StorageLocation: item.storage_location } : {}),
     })) },
   };
 }
