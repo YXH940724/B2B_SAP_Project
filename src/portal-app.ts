@@ -3,13 +3,14 @@ import express from "express";
 import type { AuthService } from "./auth-service.js";
 import type { CatalogPage, CatalogQuery } from "./catalog.js";
 import type { SapConfig } from "./config.js";
-import { normalizeCustomer } from "./master-data.js";
+import { normalizeCustomer, type ProductFulfillmentOptions } from "./master-data.js";
 import { SapODataClient } from "./odata-client.js";
 import { getSellableOffer } from "./portal.js";
 import { assertWriteAllowed, createPayload, PortalCheckoutSchema } from "./sales-orders.js";
 import type { SalesArea } from "./sales-areas.js";
 import type { Customer360Profile } from "./customer-360.js";
 import { OrderHistoryError, type CustomerOrderHistory, type OrderDetail, type OrderQuery } from "./order-history.js";
+import type { OrderDefaults } from "./order-defaults.js";
 import type { VerificationDelivery } from "./verification-delivery.js";
 
 export interface PortalDependencies {
@@ -17,7 +18,9 @@ export interface PortalDependencies {
   contact: { get(customer: string): Promise<{ customer: string; email: string }> };
   delivery: VerificationDelivery;
   order?: { config: SapConfig; client: SapODataClient };
-  catalog?: { list(customer: string, salesArea: SalesArea, query: CatalogQuery): Promise<CatalogPage> };
+  catalog?: { list(customer: string, salesArea: SalesArea, query: CatalogQuery, language?: string): Promise<CatalogPage> };
+  orderDefaults?: { get(customer: string, salesArea: SalesArea): Promise<OrderDefaults> };
+  fulfillment?: { get(product: string): Promise<ProductFulfillmentOptions> };
   salesAreas?: { list(customer: string): Promise<SalesArea[]> };
   customer?: { get(customer: string): Promise<{ customer: string; name: string; accountGroup: string; businessPartner: string }> };
   customer360?: { get(customer: string): Promise<Customer360Profile> };
@@ -63,6 +66,12 @@ function catalogQuery(req: express.Request): CatalogQuery {
   };
 }
 
+function catalogLanguage(req: express.Request): string {
+  const language = String(req.query.language ?? "ZH").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(language)) throw new Error("物料描述语言无效。");
+  return language;
+}
+
 type SalesAreaSource = { salesOrganization?: unknown; distributionChannel?: unknown; division?: unknown };
 
 function salesAreaInput(source: SalesAreaSource): Omit<SalesArea, "key"> {
@@ -76,7 +85,9 @@ function salesAreaInput(source: SalesAreaSource): Omit<SalesArea, "key"> {
 export type PortalCartLine = {
   product: string;
   quantity: number;
-  plant?: string;
+  customerMaterial?: string;
+  productionPlant?: string;
+  storageLocation?: string;
   salesOrganization: string;
   distributionChannel: string;
   division: string;
@@ -109,7 +120,9 @@ function cartLines(body: unknown): PortalCartLine[] {
     return {
       product,
       quantity,
-      plant: typeof line.plant === "string" && line.plant.trim() ? line.plant.trim() : undefined,
+      customerMaterial: optionalText(line.customerMaterial),
+      productionPlant: optionalText(line.productionPlant ?? line.plant),
+      storageLocation: optionalText(line.storageLocation),
       salesOrganization: String(line.salesOrganization ?? source.salesOrganization ?? "").trim(),
       distributionChannel: String(line.distributionChannel ?? source.distributionChannel ?? "").trim(),
       division: String(line.division ?? source.division ?? "").trim(),
@@ -147,16 +160,22 @@ function orderHistoryQuery(req: express.Request): Partial<OrderQuery> {
   };
 }
 
-function checkoutFields(body: unknown): { requested_delivery_date?: string; purchase_order_by_customer?: string; portal_note?: string } {
-  const source = body as { requestedDeliveryDate?: unknown; purchaseOrderByCustomer?: unknown; note?: unknown } | undefined;
+function checkoutFields(body: unknown): { requested_delivery_date?: string; purchase_order_by_customer?: string; portal_note?: string; customer_payment_terms?: string; incoterms_classification?: string; incoterms_version?: string; incoterms_location?: string } {
+  const source = body as { requestedDeliveryDate?: unknown; purchaseOrderByCustomer?: unknown; note?: unknown; customerPaymentTerms?: unknown; incotermsClassification?: unknown; incotermsVersion?: unknown; incotermsLocation?: unknown } | undefined;
   const parsed = PortalCheckoutSchema.safeParse({
     requested_delivery_date: optionalText(source?.requestedDeliveryDate),
     purchase_order_by_customer: optionalText(source?.purchaseOrderByCustomer),
     portal_note: optionalText(source?.note),
+    customer_payment_terms: optionalText(source?.customerPaymentTerms),
+    incoterms_classification: optionalText(source?.incotermsClassification),
+    incoterms_version: optionalText(source?.incotermsVersion),
+    incoterms_location: optionalText(source?.incotermsLocation),
   });
   if (parsed.success) return parsed.data;
   if (parsed.error.issues.some((issue) => issue.path[0] === "requested_delivery_date")) throw new Error("期望交货日期格式无效。");
   if (parsed.error.issues.some((issue) => issue.path[0] === "purchase_order_by_customer")) throw new Error("客户采购订单号无效。");
+  if (parsed.error.issues.some((issue) => issue.path[0] === "customer_payment_terms")) throw new Error("付款条款无效。");
+  if (parsed.error.issues.some((issue) => String(issue.path[0]).startsWith("incoterms_"))) throw new Error("国际贸易条款无效。");
   throw new Error("订单备注无效。");
 }
 
@@ -182,6 +201,16 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
   function catalogDependencies(): NonNullable<PortalDependencies["catalog"]> {
     if (!deps.catalog) throw new Error("商品目录服务尚未配置。");
     return deps.catalog;
+  }
+
+  function orderDefaultsDependencies(): NonNullable<PortalDependencies["orderDefaults"]> {
+    if (!deps.orderDefaults) throw new Error("订单默认值服务尚未配置。");
+    return deps.orderDefaults;
+  }
+
+  function fulfillmentDependencies(): NonNullable<PortalDependencies["fulfillment"]> {
+    if (!deps.fulfillment) throw new Error("物料履约主数据服务尚未配置。");
+    return deps.fulfillment;
   }
 
   function customerDependencies(): NonNullable<PortalDependencies["customer"]> {
@@ -222,13 +251,13 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
 
   async function priceOrderGroup(customer: string, group: PortalCartGroup): Promise<{
     salesArea: SalesArea;
-    items: Array<{ productId: string; quantity: number; unitPrice: string; currency: string; priceUnit: string; lineTotal: number }>;
+    items: Array<{ productId: string; quantity: number; unitPrice: string; currency: string; priceUnit: string; lineTotal: number; customerMaterial?: string; productionPlant?: string; storageLocation?: string; taxRate: null; taxAmount: null; taxStatus: string }>;
     totalsByCurrency: Array<{ currency: string; total: number }>;
   }> {
     const { client, config } = orderDependencies();
     const items = await Promise.all(group.items.map(async (item) => {
       const offer = await getSellableOffer(client, config, customer, group.salesArea, item.product);
-      return { productId: item.product, quantity: item.quantity, unitPrice: offer.unitPrice, currency: offer.currency, priceUnit: offer.priceUnit, lineTotal: Number(offer.unitPrice) * item.quantity };
+      return { productId: item.product, quantity: item.quantity, unitPrice: offer.unitPrice, currency: offer.currency, priceUnit: offer.priceUnit, lineTotal: Number(offer.unitPrice) * item.quantity, customerMaterial: item.customerMaterial, productionPlant: item.productionPlant, storageLocation: item.storageLocation, taxRate: null, taxAmount: null, taxStatus: "SAP 定价后确认" };
     }));
     const totals = new Map<string, number>();
     items.forEach((item) => totals.set(item.currency, (totals.get(item.currency) ?? 0) + item.lineTotal));
@@ -287,13 +316,30 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     try {
       const active = session(req);
       const salesArea = await selectedSalesArea(active.customer, req.query as Record<string, unknown>);
-      res.json(await catalogDependencies().list(active.customer, salesArea, catalogQuery(req)));
+      res.json(await catalogDependencies().list(active.customer, salesArea, catalogQuery(req), catalogLanguage(req)));
     } catch (error) { respondRouteError(res, error); }
   });
 
   app.get("/api/sales-areas", async (req, res) => {
     try {
       res.json(await salesAreaDependencies().list(session(req).customer));
+    } catch (error) { respondRouteError(res, error); }
+  });
+
+  app.get("/api/order-defaults", async (req, res) => {
+    try {
+      const active = session(req);
+      const salesArea = await selectedSalesArea(active.customer, req.query as SalesAreaSource);
+      res.json(await orderDefaultsDependencies().get(active.customer, salesArea));
+    } catch (error) { respondRouteError(res, error); }
+  });
+
+  app.get("/api/products/:product/fulfillment", async (req, res) => {
+    try {
+      session(req);
+      const product = String(req.params.product ?? "").trim();
+      if (!product || product.length > 40) throw new Error("物料无效。");
+      res.json(await fulfillmentDependencies().get(product));
     } catch (error) { respondRouteError(res, error); }
   });
 
@@ -352,7 +398,15 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
             ...checkout,
             items: preview.items.map((item) => {
               const cartLine = group.items.find((line) => line.product === item.productId);
-              return { material: item.productId, requested_quantity: item.quantity, requested_quantity_unit: item.priceUnit || "PC", plant: cartLine?.plant };
+              if (!cartLine?.productionPlant) throw new Error(`物料 ${item.productId} 尚未选择工厂。`);
+              return {
+                material: item.productId,
+                requested_quantity: item.quantity,
+                requested_quantity_unit: item.priceUnit || "PC",
+                customer_material: cartLine.customerMaterial,
+                production_plant: cartLine.productionPlant,
+                storage_location: cartLine.storageLocation,
+              };
             }),
             dry_run: false,
             confirm: "CREATE_SALES_ORDER",

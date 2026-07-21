@@ -128,6 +128,8 @@ test("lists only current A305 PR00 products with product details and pagination"
   assert.deepEqual(page.items[0], {
     product: "000000000000001386",
     description: "演示物料",
+    descriptionLanguage: "ZH",
+    descriptionFallback: false,
     productGroup: "FG",
     baseUnit: "PC",
     conditionRecord: "0000000123",
@@ -144,6 +146,23 @@ test("filters a catalog by material group and a material-number-or-description q
   const fallback = await catalog.list("0000100001", salesArea, { query: "1387", group: "UNCLASSIFIED", page: 1, pageSize: 20, sort: "material" });
   assert.equal(fallback.items.length, 1);
   assert.equal(fallback.items[0].description, "000000000000001387");
+});
+
+test("uses the requested language when reading catalog product descriptions", async () => {
+  const descriptionFilters: string[] = [];
+  const base = makeClient();
+  const client = {
+    getAt: async (service: string, path: string, params?: Record<string, string | number | undefined>) => {
+      if (path === "/A_ProductDescription") descriptionFilters.push(String(params?.["$filter"]));
+      return base.getAt(service, path, params);
+    },
+  };
+  const catalog = new CatalogService(client as never, config, () => new Date("2026-07-20T00:00:00Z"));
+
+  await catalog.list("0000100001", salesArea, { page: 1, pageSize: 20, sort: "material" }, "EN");
+
+  assert.ok(descriptionFilters.length > 0);
+  assert.ok(descriptionFilters.every((filter) => filter.includes("Language eq 'EN'")));
 });
 
 test("keeps only prices matching the customer and selected sales area", async () => {

@@ -19,24 +19,37 @@ function makeApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => st
   return { app, getCode: () => code };
 }
 
-function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string; getOrderQuery: () => Record<string, unknown> | undefined } {
+function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string; getOrderQuery: () => Record<string, unknown> | undefined; getCatalogLanguage: () => string | undefined } {
   let code = "";
   let latestOrderQuery: Record<string, unknown> | undefined;
+  let latestCatalogLanguage: string | undefined;
   const auth = new AuthService(createAuthStore(":memory:"), () => 1_700_000_000_000, () => "123456");
   const app = createPortalApp({
     auth,
     contact: { get: async (customer: string) => ({ customer: customer.padStart(10, "0"), email: "buyer@example.test" }) },
     delivery: { send: async (_customer: string, sentCode: string) => { code = sentCode; } },
     salesAreas: { list: async () => [{ salesOrganization: "1000", distributionChannel: "10", division: "00", key: "1000/10/00" }] },
-    catalog: { list: async (customer: string, area: { key: string }) => {
+    catalog: { list: async (customer: string, area: { key: string }, _query, language?: string) => {
       assert.equal(customer, "0000100001");
       assert.equal(area.key, "1000/10/00");
+      latestCatalogLanguage = language;
       return {
-      items: [{ product: "000000000000001386", description: "演示物料", productGroup: "FG", baseUnit: "PC", conditionRecord: "0000000123", unitPrice: "30.00", currency: "CNY", priceUnit: "PC" }],
+      items: [{ product: "000000000000001386", description: "演示物料", descriptionLanguage: "ZH", descriptionFallback: false, productGroup: "FG", baseUnit: "PC", conditionRecord: "0000000123", unitPrice: "30.00", currency: "CNY", priceUnit: "PC" }],
       groups: [{ code: "FG", label: "FG", count: 1 }], page: 1, pageSize: 20, total: 1, pageCount: 1,
       };
     } },
     customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
+    orderDefaults: { get: async (customer, area) => {
+      assert.equal(customer, "0000100001");
+      assert.equal(area.key, "1000/10/00");
+      return { paymentTerms: "0001", incotermsClassification: "FOB", incotermsVersion: "2020", incotermsLocation: "上海" };
+    } },
+    fulfillment: { get: async (product) => ({
+      product,
+      defaultPlant: "1000",
+      plants: ["1000"],
+      storageLocationsByPlant: { "1000": ["0001"] },
+    }) },
     orderHistory: {
       list: async (customer: string, query) => {
         latestOrderQuery = query;
@@ -75,7 +88,7 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
       },
     },
   });
-  return { app, getCode: () => code, getOrderQuery: () => latestOrderQuery };
+  return { app, getCode: () => code, getOrderQuery: () => latestOrderQuery, getCatalogLanguage: () => latestCatalogLanguage };
 }
 
 async function registeredAgent(factory: () => { app: ReturnType<typeof createPortalApp>; getCode: () => string }) {
@@ -162,6 +175,27 @@ test("returns a session-protected, paginated catalog and customer summary", asyn
   assert.deepEqual((await agent.get("/api/me").expect(200)).body, {
     customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046",
   });
+});
+
+test("uses the requested language for the current session customer's catalog", async () => {
+  const storefront = makeStorefrontApp();
+  const agent = await registeredAgent(() => storefront);
+  await agent.get("/api/catalog?salesOrganization=1000&distributionChannel=10&division=00&language=EN").expect(200);
+  assert.equal(storefront.getCatalogLanguage(), "EN");
+});
+
+test("returns order defaults and fulfillment options only within the signed-in session", async () => {
+  const agent = await registeredAgent(makeStorefrontApp);
+  const defaults = await agent.get("/api/order-defaults?salesOrganization=1000&distributionChannel=10&division=00").expect(200);
+  assert.deepEqual(defaults.body, { paymentTerms: "0001", incotermsClassification: "FOB", incotermsVersion: "2020", incotermsLocation: "上海" });
+  const fulfillment = await agent.get("/api/products/000000000000001386/fulfillment").expect(200);
+  assert.deepEqual(fulfillment.body, {
+    product: "000000000000001386",
+    defaultPlant: "1000",
+    plants: ["1000"],
+    storageLocationsByPlant: { "1000": ["0001"] },
+  });
+  await request(makeStorefrontApp().app).get("/api/order-defaults?salesOrganization=1000&distributionChannel=10&division=00").expect(401);
 });
 
 test("rejects catalog requests without a session and rejects invalid page size", async () => {

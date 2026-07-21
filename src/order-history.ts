@@ -71,8 +71,32 @@ export type PaginatedOrderHistory = {
 };
 
 export type OrderDetail = {
-  header: OrderSummary & { requestedDeliveryDate: string | null; customerPurchaseOrderDate: string | null; createdByUser: string | null };
-  items: Array<{ item: string; material: string | null; description: string | null; quantity: number; unit: string | null; netPrice: number | null; netAmount: number; currency: string | null; deliveryStatus: OrderStatus }>;
+  header: OrderSummary & {
+    requestedDeliveryDate: string | null;
+    customerPurchaseOrderDate: string | null;
+    createdByUser: string | null;
+    paymentTerms: string | null;
+    incotermsClassification: string | null;
+    incotermsVersion: string | null;
+    incotermsLocation: string | null;
+  };
+  items: Array<{
+    item: string;
+    material: string | null;
+    description: string | null;
+    quantity: number;
+    unit: string | null;
+    netPrice: number | null;
+    netAmount: number;
+    currency: string | null;
+    deliveryStatus: OrderStatus;
+    customerMaterial: string | null;
+    productionPlant: string | null;
+    storageLocation: string | null;
+    taxCode: string | null;
+    taxRate: number | null;
+    taxAmount: number | null;
+  }>;
 };
 
 export type OrderHistoryErrorCode = "ORDER_NOT_FOUND" | "SAP_READ_FAILED";
@@ -311,6 +335,10 @@ function toDetailHeader(row: Record<string, unknown>): OrderDetail["header"] {
     requestedDeliveryDate: optionalCreatedAt(row.RequestedDeliveryDate),
     customerPurchaseOrderDate: optionalCreatedAt(row.CustomerPurchaseOrderDate),
     createdByUser: optionalText(row.CreatedByUser),
+    paymentTerms: optionalText(row.CustomerPaymentTerms),
+    incotermsClassification: optionalText(row.IncotermsClassification),
+    incotermsVersion: optionalText(row.IncotermsVersion),
+    incotermsLocation: optionalText(row.IncotermsTransferLocation),
   };
 }
 
@@ -325,6 +353,12 @@ function toOrderLine(row: Record<string, unknown>): OrderDetail["items"][number]
     netAmount: amount(row.NetAmount),
     currency: optionalText(row.TransactionCurrency),
     deliveryStatus: status(row.OverallDeliveryStatus),
+    customerMaterial: optionalText(row.MaterialByCustomer),
+    productionPlant: optionalText(row.ProductionPlant),
+    storageLocation: optionalText(row.StorageLocation),
+    taxCode: optionalText(row.TaxCode),
+    taxRate: optionalAmount(row.TaxRate),
+    taxAmount: optionalAmount(row.TaxAmount),
   };
 }
 
