@@ -228,6 +228,13 @@ test("serves the rich SAP order workbench controls", () => {
   }
 });
 
+test("serves filter, pagination and detail renderers for the order workbench", () => {
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
+  for (const name of ["function renderOrderWorkbench", "function openOrderDetail", "api(`/api/orders/${salesOrder}`)", "order-filter-form"]) {
+    assert.match(script, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("keeps inactive portal views visually hidden", () => {
   const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/view-visibility.css"), "utf8");
   assert.match(styles, /\[hidden\]\{display:none!important\}/);

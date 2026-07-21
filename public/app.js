@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const cart = [];
 const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material", salesArea: null };
+const orderState = { page: 1, pageSize: 20, from: "", to: "", salesOrganization: "", overallStatus: "", deliveryStatus: "", query: "", sort: "createdAt:desc" };
 let lastPreview = null;
 
 const authNote = (text) => { $("auth-message").textContent = text; };
@@ -225,45 +226,213 @@ async function loadCustomer360() {
   } catch (error) { portalNote(error.message); }
 }
 
-function renderOrderRows(host, orders, emptyText) {
+function unmaintained(value) {
+  return value === undefined || value === null || value === "" ? "SAP 未维护" : String(value);
+}
+
+function statusBadge(status) {
+  return element("span", `status-badge status-${status?.tone || "neutral"}`, status?.label || "SAP 未维护");
+}
+
+function formatCurrencyTotals(totalsByCurrency) {
+  return Array.isArray(totalsByCurrency) && totalsByCurrency.length
+    ? totalsByCurrency.map(({ currency, totalAmount }) => `${currency || "SAP 未维护"} ${Number(totalAmount).toFixed(2)}`).join(" · ")
+    : "SAP 未维护";
+}
+
+function formatMoney(currency, amount) {
+  return amount === undefined || amount === null || amount === "" ? "SAP 未维护" : `${currency || "SAP 未维护"} ${Number(amount).toFixed(2)}`;
+}
+
+function renderOrderRows(host, orders, emptyText, showDetail = false) {
   host.replaceChildren();
   if (!orders.length) {
     host.append(element("p", "empty-state", emptyText));
     return;
   }
   const table = document.createElement("table");
-  table.innerHTML = "<thead><tr><th>订单号</th><th>日期</th><th>销售组织</th><th>状态</th><th>金额</th></tr></thead>";
+  table.innerHTML = `<thead><tr><th>订单号</th><th>日期</th><th>销售组织</th><th>状态</th><th>金额</th>${showDetail ? "<th>操作</th>" : ""}</tr></thead>`;
   const body = document.createElement("tbody");
   orders.forEach((order) => {
     const row = document.createElement("tr");
-    [order.salesOrder.replace(/^0+/, "") || order.salesOrder, order.createdAt || "—", order.salesOrganization || "—", order.status || "—", `${order.currency || ""} ${Number(order.total || 0).toFixed(2)}`.trim()].forEach((value) => row.append(element("td", "", value)));
+    row.append(
+      element("td", "", unmaintained(order.salesOrder).replace(/^0+/, "") || unmaintained(order.salesOrder)),
+      element("td", "", unmaintained(order.createdAt)),
+      element("td", "", unmaintained(order.salesOrganization)),
+    );
+    const statusCell = element("td");
+    statusCell.append(statusBadge(order.overallStatus));
+    row.append(statusCell, element("td", "", formatMoney(order.currency, order.total)));
+    if (showDetail) {
+      const actionCell = element("td");
+      const detail = element("button", "text-button", "查看明细");
+      detail.type = "button";
+      detail.addEventListener("click", () => openOrderDetail(order.salesOrder));
+      actionCell.append(detail);
+      row.append(actionCell);
+    }
     body.append(row);
   });
   table.append(body);
   host.append(table);
 }
 
-function renderOrderDashboard(history) {
+function renderOrderDashboard(dashboard, pageItemCount) {
   const summary = $("order-dashboard-summary");
   summary.replaceChildren();
-  const cards = [["订单总数", String(history.dashboard.orderCount)], ["订单金额", `${history.dashboard.currency || ""} ${Number(history.dashboard.totalAmount || 0).toFixed(2)}`.trim()], ["SAP 销售订单", String(history.sapOrders.length)]];
+  const cards = [
+    ["订单总数", String(dashboard?.orderCount ?? 0)],
+    ["订单金额", formatCurrencyTotals(dashboard?.totalsByCurrency)],
+    ["履约处理中", String(dashboard?.inFulfillmentCount ?? 0)],
+    ["本页订单", String(pageItemCount)],
+  ];
   cards.forEach(([label, value]) => {
     const card = element("article", "dashboard-card");
     card.append(element("span", "", label), element("strong", "", value));
     summary.append(card);
   });
-  const monthly = element("div", "dashboard-months");
-  (history.dashboard.months || []).forEach((month) => monthly.append(element("span", "", `${month.month}: ${month.orderCount} 单`)));
-  summary.append(monthly);
-  renderOrderRows($("sap-orders-list"), history.sapOrders, "近 12 个月没有 SAP 销售订单。");
 }
 
-async function loadOrderCenter() {
+function renderOrderAnalytics(dashboard) {
+  const trend = $("order-trend");
+  trend.replaceChildren();
+  trend.append(element("h3", "", "订单趋势"), element("p", "", "按创建月份查看订单数量与金额走势。"));
+  const months = element("div", "dashboard-months");
+  (dashboard?.months || []).forEach((month) => {
+    months.append(element("span", "", `${unmaintained(month.month)}：${month.orderCount ?? 0} 单 · ${formatCurrencyTotals(month.totalsByCurrency)}`));
+  });
+  if (!months.childElementCount) months.append(element("p", "empty-state", "SAP 未维护近 12 个月订单趋势。"));
+  trend.append(months);
+}
+
+function renderOrderInsights(insights) {
+  const host = $("order-insights");
+  host.replaceChildren();
+  const salesOrganizations = element("article", "insight-card");
+  salesOrganizations.append(element("h3", "", "销售组织"));
+  const organizations = insights?.topSalesOrganizations || [];
+  if (!organizations.length) salesOrganizations.append(element("p", "", "SAP 未维护"));
+  organizations.forEach((organization) => salesOrganizations.append(element("p", "", `${unmaintained(organization.salesOrganization)}：${organization.orderCount ?? 0} 单 · ${formatCurrencyTotals(organization.totalsByCurrency)}`)));
+
+  const largest = insights?.largestOrder;
+  const largestOrder = element("article", "insight-card");
+  largestOrder.append(element("h3", "", "最大订单"));
+  largestOrder.append(element("p", "", largest ? `${unmaintained(largest.salesOrder).replace(/^0+/, "") || unmaintained(largest.salesOrder)} · ${formatMoney(largest.currency, largest.total)}` : "SAP 未维护"));
+
+  const attention = element("article", "insight-card");
+  attention.append(element("h3", "", "待关注订单"));
+  attention.append(element("p", "", `需关注 ${insights?.attentionCount ?? 0} 单`), element("p", "", `最近订单：${unmaintained(insights?.latestOrderDate)}`));
+  host.append(salesOrganizations, largestOrder, attention);
+}
+
+function renderOrderPagination(data) {
+  const host = $("order-pagination");
+  host.replaceChildren();
+  if (!data.total) return;
+  const previous = element("button", "pagination-button", "上一页");
+  previous.type = "button";
+  previous.disabled = data.page <= 1;
+  previous.addEventListener("click", () => loadOrderCenter({ page: data.page - 1 }));
+  const next = element("button", "pagination-button", "下一页");
+  next.type = "button";
+  next.disabled = data.page >= data.pageCount;
+  next.addEventListener("click", () => loadOrderCenter({ page: data.page + 1 }));
+  host.append(previous, element("span", "page-summary", `第 ${data.page} / ${data.pageCount || 1} 页，共 ${data.total} 单`), next);
+}
+
+function appendOrderSelectOptions(id, options, selected) {
+  const select = $(id);
+  const known = new Set([...select.options].map((option) => option.value));
+  options.forEach(({ value, label }) => {
+    if (value && !known.has(value)) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.append(option);
+      known.add(value);
+    }
+  });
+  select.value = selected || "";
+}
+
+function renderOrderFilterOptions(data) {
+  appendOrderSelectOptions("order-sales-organization", (data.insights?.topSalesOrganizations || []).map((item) => ({ value: item.salesOrganization, label: item.salesOrganization || "SAP 未维护" })), orderState.salesOrganization);
+  appendOrderSelectOptions("order-overall-status", (data.dashboard?.statuses || []).map((item) => ({ value: item.status?.code, label: item.status?.label || "SAP 未维护" })), orderState.overallStatus);
+  appendOrderSelectOptions("order-delivery-status", (data.items || []).map((item) => ({ value: item.deliveryStatus?.code, label: item.deliveryStatus?.label || "SAP 未维护" })), orderState.deliveryStatus);
+}
+
+function renderOrderDetail(data) {
+  const header = data.header || {};
+  const detailHeader = $("order-detail-header");
+  detailHeader.replaceChildren();
+  detailHeader.append(element("h3", "", `订单 ${unmaintained(header.salesOrder).replace(/^0+/, "") || unmaintained(header.salesOrder)}`));
+  const fields = [
+    ["创建日期", header.createdAt], ["销售组织", header.salesOrganization], ["分销渠道", header.distributionChannel], ["产品组", header.division],
+    ["客户采购订单号", header.purchaseOrderByCustomer], ["期望交货日期", header.requestedDeliveryDate], ["客户采购订单日期", header.customerPurchaseOrderDate], ["创建人", header.createdByUser],
+  ];
+  const details = element("dl", "order-detail-fields");
+  fields.forEach(([label, value]) => details.append(element("dt", "", label), element("dd", "", unmaintained(value))));
+  const total = element("p", "order-total", `订单金额：${formatMoney(header.currency, header.total)}`);
+  const statuses = element("p", "order-statuses");
+  statuses.append(statusBadge(header.overallStatus), statusBadge(header.deliveryStatus), statusBadge(header.billingStatus));
+  detailHeader.append(details, total, statuses);
+
+  const lines = $("order-detail-lines");
+  lines.replaceChildren();
+  const items = data.items || [];
+  if (!items.length) {
+    lines.append(element("p", "empty-state", "SAP 未维护订单行项目。"));
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>项目</th><th>物料</th><th>描述</th><th>数量</th><th>净价</th><th>净额</th><th>交货状态</th></tr></thead>";
+  const body = document.createElement("tbody");
+  items.forEach((item) => {
+    const row = document.createElement("tr");
+    [unmaintained(item.item), unmaintained(item.material), unmaintained(item.description), `${unmaintained(item.quantity)} ${item.unit || "SAP 未维护"}`, formatMoney(item.currency, item.netPrice), formatMoney(item.currency, item.netAmount)].forEach((value) => row.append(element("td", "", value)));
+    const delivery = element("td");
+    delivery.append(statusBadge(item.deliveryStatus));
+    row.append(delivery);
+    body.append(row);
+  });
+  table.append(body);
+  lines.append(table);
+}
+
+function renderOrderWorkbench(data) {
+  renderOrderFilterOptions(data);
+  renderOrderDashboard(data.dashboard, data.items.length);
+  renderOrderAnalytics(data.dashboard);
+  renderOrderInsights(data.insights);
+  renderOrderRows($("sap-orders-list"), data.items, "未找到符合当前条件的 SAP 销售订单。", true);
+  renderOrderPagination(data);
+}
+
+async function openOrderDetail(salesOrder) {
+  const dialog = $("order-detail-dialog");
+  $("order-detail-header").textContent = "正在加载订单详情…";
+  $("order-detail-lines").replaceChildren();
+  if (!dialog.open) dialog.showModal();
+  try {
+    salesOrder = encodeURIComponent(salesOrder);
+    renderOrderDetail(await api(`/api/orders/${salesOrder}`));
+  } catch (error) { $("order-detail-header").textContent = error.message; }
+}
+
+async function loadOrderCenter(next = {}) {
+  Object.assign(orderState, next);
+  const params = new URLSearchParams(Object.entries(orderState).filter(([, value]) => value !== "").map(([key, value]) => [key, String(value)]));
   portalNote("正在加载订单中心…");
   try {
-    renderOrderDashboard(await api("/api/orders/history"));
+    const data = await api(`/api/orders/history?${params}`);
+    Object.assign(orderState, { page: data.page, pageSize: data.pageSize });
+    renderOrderWorkbench(data);
     portalNote("");
-  } catch (error) { portalNote(error.message); }
+  } catch (error) {
+    $("sap-orders-list").replaceChildren(element("p", "empty-state", error.message));
+    $("order-pagination").replaceChildren();
+    portalNote(error.message);
+  }
 }
 
 async function loadCatalog(next = {}) {
@@ -368,6 +537,20 @@ $("sales-area-select").addEventListener("change", () => {
   catalogState.salesArea = option ? { salesOrganization: option.dataset.salesOrganization, distributionChannel: option.dataset.distributionChannel, division: option.dataset.division, key: option.value } : null;
   loadCatalog({ page: 1, group: "" });
 });
+$("order-filter-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadOrderCenter({
+    page: 1,
+    query: $("order-query").value.trim(),
+    from: $("order-from").value,
+    to: $("order-to").value,
+    salesOrganization: $("order-sales-organization").value,
+    overallStatus: $("order-overall-status").value,
+    deliveryStatus: $("order-delivery-status").value,
+    sort: $("order-sort").value,
+  });
+});
+$("close-order-detail").addEventListener("click", () => $("order-detail-dialog").close());
 $("checkout-button").addEventListener("click", openCheckout);
 $("back-to-cart-button").addEventListener("click", () => { showView("catalog"); $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
 
