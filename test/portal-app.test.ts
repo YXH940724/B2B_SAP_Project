@@ -35,6 +35,11 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
       };
     } },
     customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
+    orderHistory: { list: async (customer: string) => ({
+      sapOrders: [{ salesOrder: "0000001372", createdAt: "2026-07-01", salesOrganization: "1310", total: 100, currency: "CNY", status: "A", source: "sap" }],
+      portalOrders: [{ salesOrder: "0000002001", createdAt: "2026-07-02", salesOrganization: "1310", total: 50, currency: "CNY", status: "已同步", source: "portal" }],
+      dashboard: { orderCount: customer === "0000100001" ? 2 : 0, totalAmount: 150, currency: "CNY", months: [] },
+    }) },
   });
   return { app, getCode: () => code };
 }
@@ -126,6 +131,15 @@ test("rejects an invalid checkout delivery date before SAP pricing", async () =>
     items: [{ product: "1386", quantity: 1 }], requestedDeliveryDate: "2026/08/01",
   }).expect(400);
   assert.match(response.body.error, /期望交货日期/);
+});
+
+test("returns both SAP and portal orders with a session-protected dashboard", async () => {
+  const agent = await registeredAgent(makeStorefrontApp);
+  const response = await agent.get("/api/orders/history").expect(200);
+  assert.equal(response.body.sapOrders[0].salesOrder, "0000001372");
+  assert.equal(response.body.portalOrders[0].salesOrder, "0000002001");
+  assert.equal(response.body.dashboard.totalAmount, 150);
+  await request(makeStorefrontApp().app).get("/api/orders/history").expect(401);
 });
 
 test("serves the storefront navigation, catalog controls, cart and checkout fields", () => {
