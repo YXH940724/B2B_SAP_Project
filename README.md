@@ -9,6 +9,7 @@
 - 更新要求传入 `sap_get_sales_order` 返回的 ETag，以避免覆盖并发修改。
 - 可更新字段由 `SAP_WRITE_ALLOWED_FIELDS` 白名单控制。
 - 必须通过 `SAP_CA_CERT_PATH` 信任企业 CA。生产环境拒绝关闭 TLS 证书校验。
+- 测试 SAP 若使用自签名证书，仅可在 `NODE_ENV=development` 下显式设置 `SAP_TLS_REJECT_UNAUTHORIZED=false` 用于临时联调。生产环境必须配置 `SAP_CA_CERT_PATH` 并保持 TLS 校验开启。
 - 密码和证书不允许写入 Git 仓库。
 
 ## 安装与构建

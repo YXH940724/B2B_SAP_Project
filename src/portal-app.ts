@@ -9,7 +9,7 @@ import { getSellableOffer } from "./portal.js";
 import { assertWriteAllowed, createPayload, PortalCheckoutSchema } from "./sales-orders.js";
 import type { SalesArea } from "./sales-areas.js";
 import type { Customer360Profile } from "./customer-360.js";
-import type { CustomerOrderHistory } from "./order-history.js";
+import { OrderHistoryError, type CustomerOrderHistory, type OrderDetail, type OrderQuery } from "./order-history.js";
 import type { VerificationDelivery } from "./verification-delivery.js";
 
 export interface PortalDependencies {
@@ -21,7 +21,10 @@ export interface PortalDependencies {
   salesAreas?: { list(customer: string): Promise<SalesArea[]> };
   customer?: { get(customer: string): Promise<{ customer: string; name: string; accountGroup: string; businessPartner: string }> };
   customer360?: { get(customer: string): Promise<Customer360Profile> };
-  orderHistory?: { list(customer: string): Promise<CustomerOrderHistory> };
+  orderHistory?: {
+    list(customer: string, query: Partial<OrderQuery>): Promise<CustomerOrderHistory>;
+    detail(customer: string, salesOrder: string): Promise<OrderDetail>;
+  };
   staticRoot?: string;
   production?: boolean;
 }
@@ -71,6 +74,29 @@ function salesAreaInput(source: Record<string, unknown>): Omit<SalesArea, "key">
 function optionalText(input: unknown): string | undefined {
   const value = typeof input === "string" ? input.trim() : "";
   return value || undefined;
+}
+
+function stringQuery(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberQuery(value: unknown): number | undefined {
+  const parsed = Number(stringQuery(value));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function orderHistoryQuery(req: express.Request): Partial<OrderQuery> {
+  return {
+    page: numberQuery(req.query.page),
+    pageSize: numberQuery(req.query.pageSize) as OrderQuery["pageSize"] | undefined,
+    from: stringQuery(req.query.from),
+    to: stringQuery(req.query.to),
+    salesOrganization: stringQuery(req.query.salesOrganization),
+    overallStatus: stringQuery(req.query.overallStatus),
+    deliveryStatus: stringQuery(req.query.deliveryStatus),
+    query: stringQuery(req.query.query),
+    sort: stringQuery(req.query.sort) as OrderQuery["sort"] | undefined,
+  };
 }
 
 function checkoutFields(body: unknown): { requested_delivery_date?: string; purchase_order_by_customer?: string; portal_note?: string } {
@@ -141,7 +167,8 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
 
   function respondRouteError(res: express.Response, error: unknown): void {
     const message = error instanceof Error ? error.message : "请求失败。";
-    res.status(message === "请重新登录。" ? 401 : 400).json({ error: message });
+    const status = error instanceof OrderHistoryError ? error.httpStatus : message === "请重新登录。" ? 401 : 400;
+    res.status(status).json({ error: message });
   }
 
   app.post("/api/register/request-code", async (req, res) => {
@@ -217,7 +244,13 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
 
   app.get("/api/orders/history", async (req, res) => {
     try {
-      res.json(await orderHistoryDependencies().list(session(req).customer));
+      res.json(await orderHistoryDependencies().list(session(req).customer, orderHistoryQuery(req)));
+    } catch (error) { respondRouteError(res, error); }
+  });
+
+  app.get("/api/orders/:salesOrder", async (req, res) => {
+    try {
+      res.json(await orderHistoryDependencies().detail(session(req).customer, req.params.salesOrder));
     } catch (error) { respondRouteError(res, error); }
   });
 
