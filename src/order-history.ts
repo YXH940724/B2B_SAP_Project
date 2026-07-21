@@ -362,6 +362,40 @@ function toOrderLine(row: Record<string, unknown>): OrderDetail["items"][number]
   };
 }
 
+type PricingTax = Pick<OrderDetail["items"][number], "taxCode" | "taxRate" | "taxAmount">;
+
+function pricingTaxesByItem(value: unknown): Map<string, PricingTax> {
+  const taxes = new Map<string, PricingTax>();
+  rows(value).forEach((row) => {
+    const item = text(row.SalesOrderItem);
+    const taxCode = optionalText(row.TaxCode);
+    if (!item || !taxCode) return;
+    const existing = taxes.get(item);
+    const amount = optionalAmount(row.ConditionAmount);
+    taxes.set(item, {
+      taxCode,
+      taxRate: existing?.taxRate ?? optionalAmount(row.ConditionRateValue),
+      taxAmount: existing?.taxAmount === null || existing?.taxAmount === undefined
+        ? amount
+        : amount === null ? existing.taxAmount : existing.taxAmount + amount,
+    });
+  });
+  return taxes;
+}
+
+async function readPricingTaxes(client: ODataReader, salesOrder: string): Promise<Map<string, PricingTax>> {
+  try {
+    const response = await client.get<unknown>("/A_SalesOrderItemPrElement", {
+      "$filter": `SalesOrder eq '${salesOrder}'`,
+      "$select": "SalesOrder,SalesOrderItem,ConditionType,TaxCode,ConditionRateValue,ConditionAmount,ConditionCurrency",
+      "$top": 1000,
+    });
+    return pricingTaxesByItem(response.data);
+  } catch {
+    return new Map();
+  }
+}
+
 export class OrderHistoryService {
   constructor(private readonly client: ODataReader, private readonly now: () => Date = () => new Date()) {}
 
@@ -397,6 +431,14 @@ export class OrderHistoryService {
     const header = await readOrderData(() => this.client.get<Record<string, unknown>>(`/A_SalesOrder('${salesOrder}')`), true);
     if (normalizeCustomer(text(header.data.SoldToParty)) !== customer) throw orderNotFound();
     const lines = await readOrderData(() => this.client.get<unknown>(`/A_SalesOrder('${salesOrder}')/to_Item`));
-    return { header: toDetailHeader(header.data), items: rows(lines.data).map(toOrderLine) };
+    const taxes = await readPricingTaxes(this.client, salesOrder);
+    return {
+      header: toDetailHeader(header.data),
+      items: rows(lines.data).map((row) => {
+        const item = toOrderLine(row);
+        const tax = taxes.get(item.item);
+        return tax ? { ...item, ...tax } : item;
+      }),
+    };
   }
 }
