@@ -15,10 +15,12 @@ test("reads payment and Incoterms defaults from the exact customer sales area wi
     assert.equal(path, "/A_CustomerSalesArea");
     filter = String(params?.["$filter"]);
     select = String(params?.["$select"]);
-    return { data: { results: [{ CustomerPaymentTerms: "0001", IncotermsClassification: "FOB", IncotermsVersion: "2020", IncotermsTransferLocation: "Shanghai", IncotermsLocation1: "CN SHA" }] } };
+    return { data: { results: [{ CustomerPaymentTerms: "0001", IncotermsClassification: "FOB", IncotermsTransferLocation: "Legacy location", IncotermsLocation1: "CN SHA" }] } };
   } };
   const defaults = await getOrderDefaults(client as never, config, "100001", area);
   assert.equal(filter, "Customer eq '0000100001' and SalesOrganization eq '1310' and DistributionChannel eq '10' and Division eq '00'");
   assert.equal(select.includes("IncotermsVersion"), false);
-  assert.deepEqual(defaults, { paymentTerms: "0001", incotermsClassification: "FOB", incotermsLocation: "Shanghai" });
+  assert.equal(select.includes("IncotermsTransferLocation"), false);
+  assert.equal(select.includes("IncotermsLocation1"), true);
+  assert.deepEqual(defaults, { paymentTerms: "0001", incotermsClassification: "FOB", incotermsLocation: "CN SHA" });
 });
