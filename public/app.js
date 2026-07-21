@@ -174,7 +174,7 @@ function renderCart() {
 }
 
 function showView(name) {
-  const views = { catalog: "view-catalog", orderEntry: "view-order-entry", customer360: "view-customer-360" };
+  const views = { catalog: "view-catalog", orderEntry: "view-order-entry", customer360: "view-customer-360", orders: "view-orders" };
   Object.entries(views).forEach(([viewName, id]) => { $(id).hidden = viewName !== name; });
 }
 
@@ -221,6 +221,48 @@ async function loadCustomer360() {
   portalNote("正在加载客户 360 档案…");
   try {
     renderCustomer360(await api("/api/customer-360"));
+    portalNote("");
+  } catch (error) { portalNote(error.message); }
+}
+
+function renderOrderRows(host, orders, emptyText) {
+  host.replaceChildren();
+  if (!orders.length) {
+    host.append(element("p", "empty-state", emptyText));
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>订单号</th><th>日期</th><th>销售组织</th><th>状态</th><th>金额</th></tr></thead>";
+  const body = document.createElement("tbody");
+  orders.forEach((order) => {
+    const row = document.createElement("tr");
+    [order.salesOrder.replace(/^0+/, "") || order.salesOrder, order.createdAt || "—", order.salesOrganization || "—", order.status || "—", `${order.currency || ""} ${Number(order.total || 0).toFixed(2)}`.trim()].forEach((value) => row.append(element("td", "", value)));
+    body.append(row);
+  });
+  table.append(body);
+  host.append(table);
+}
+
+function renderOrderDashboard(history) {
+  const summary = $("order-dashboard-summary");
+  summary.replaceChildren();
+  const cards = [["订单总数", String(history.dashboard.orderCount)], ["订单金额", `${history.dashboard.currency || ""} ${Number(history.dashboard.totalAmount || 0).toFixed(2)}`.trim()], ["SAP 历史", String(history.sapOrders.length)], ["门户同步", String(history.portalOrders.length)]];
+  cards.forEach(([label, value]) => {
+    const card = element("article", "dashboard-card");
+    card.append(element("span", "", label), element("strong", "", value));
+    summary.append(card);
+  });
+  const monthly = element("div", "dashboard-months");
+  (history.dashboard.months || []).forEach((month) => monthly.append(element("span", "", `${month.month}: ${month.orderCount} 单`)));
+  summary.append(monthly);
+  renderOrderRows($("sap-orders-list"), history.sapOrders, "近 12 个月没有 SAP 历史订单。");
+  renderOrderRows($("portal-orders-list"), history.portalOrders, "近 12 个月没有门户同步订单。");
+}
+
+async function loadOrderCenter() {
+  portalNote("正在加载订单中心…");
+  try {
+    renderOrderDashboard(await api("/api/orders/history"));
     portalNote("");
   } catch (error) { portalNote(error.message); }
 }
@@ -372,9 +414,10 @@ $("nav-customer").addEventListener("click", async (event) => {
   showView("customer360");
   await loadCustomer360();
 });
-$("nav-orders").addEventListener("click", (event) => {
+$("nav-orders").addEventListener("click", async (event) => {
   event.preventDefault();
-  portalNote("订单中心与订单分析将在下一阶段启用。");
+  showView("orders");
+  await loadOrderCenter();
 });
 
 renderCart();

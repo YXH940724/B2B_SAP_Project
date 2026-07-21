@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SAP 客户订货商城</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/order-center.css">
 </head>
 <body>
   <main>
@@ -92,6 +93,13 @@
       <section id="view-customer-360" class="checkout-panel customer-360-view" hidden>
         <div id="customer-business-illustration" class="business-illustration" aria-label="商务客户插画">🏢</div>
         <div><p class="eyebrow">客户中心</p><h2>客户 360° 档案</h2><p>展示 SAP 维护的客户、地址、联系方式、银行及销售范围信息。</p><div id="customer-360-content"></div></div>
+      </section>
+
+      <section id="view-orders" class="checkout-panel orders-view" hidden>
+        <div><p class="eyebrow">订单中心</p><h2>近 12 个月订单分析</h2><p>同时展示 SAP 历史订单与通过本门户同步的订单记录。</p></div>
+        <div id="order-dashboard-summary" class="dashboard-summary" aria-live="polite"></div>
+        <section class="order-source"><h3>SAP 历史订单</h3><div id="sap-orders-list"></div></section>
+        <section class="order-source"><h3>门户同步订单</h3><div id="portal-orders-list"></div></section>
       </section>
     </section>
   </main>

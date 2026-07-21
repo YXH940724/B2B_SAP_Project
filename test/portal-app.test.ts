@@ -171,6 +171,17 @@ test("serves independent order-entry and customer-360 views", () => {
   assert.match(script, /api\/customer-360/);
 });
 
+test("serves an order-center dashboard for SAP and portal order sources", () => {
+  const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
+  assert.match(html, /id="view-orders"/);
+  assert.match(html, /id="order-dashboard-summary"/);
+  assert.match(html, /id="sap-orders-list"/);
+  assert.match(html, /id="portal-orders-list"/);
+  assert.match(script, /api\/orders\/history/);
+  assert.match(script, /function renderOrderDashboard/);
+});
+
 test("keeps storefront informational feedback separate from authentication error styling", () => {
   const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/styles.css"), "utf8");
   assert.match(styles, /#auth-message\{[^}]*color:#b42318/);
