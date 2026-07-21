@@ -10,6 +10,11 @@ export interface ODataResponse<T> {
   etag?: string;
 }
 
+type CsrfSession = {
+  token: string;
+  cookie?: string;
+};
+
 export class SapODataError extends Error {
   constructor(message: string, readonly status?: number) {
     super(message);
@@ -44,7 +49,7 @@ export class SapODataClient {
   }
 
   async write<T>(method: "post" | "patch", path: string, body: unknown, etag?: string): Promise<ODataResponse<T>> {
-    const csrfToken = await this.fetchCsrfToken();
+    const csrf = await this.fetchCsrfToken();
     try {
       const response = await this.http.request<ODataEnvelope<T>>({
         method,
@@ -53,7 +58,8 @@ export class SapODataClient {
         data: body,
         headers: {
           "Content-Type": "application/json",
-          "X-CSRF-Token": csrfToken,
+          "X-CSRF-Token": csrf.token,
+          ...(csrf.cookie ? { Cookie: csrf.cookie } : {}),
           ...(etag ? { "If-Match": etag } : {}),
         },
       });
@@ -63,7 +69,7 @@ export class SapODataClient {
     }
   }
 
-  private async fetchCsrfToken(): Promise<string> {
+  private async fetchCsrfToken(): Promise<CsrfSession> {
     try {
       const response: AxiosResponse = await this.http.get("/", {
         params: { "sap-client": this.config.client },
@@ -71,7 +77,11 @@ export class SapODataClient {
       });
       const token = response.headers["x-csrf-token"];
       if (typeof token !== "string" || !token) throw new SapODataError("SAP did not return a CSRF token. Verify the service user has write permission.");
-      return token;
+      const setCookie = response.headers["set-cookie"];
+      const cookie = Array.isArray(setCookie)
+        ? setCookie.map((value) => value.split(";", 1)[0]).filter(Boolean).join("; ") || undefined
+        : undefined;
+      return { token, cookie };
     } catch (error) {
       if (error instanceof SapODataError) throw error;
       throw toSapError(error);
