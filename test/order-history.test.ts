@@ -145,6 +145,22 @@ test("maps a missing SAP order detail to the same safe 404 error contract", asyn
   });
 });
 
+test("maps an Axios-style missing order detail to a safe 404 error contract", async () => {
+  const sensitiveSapMessage = "sensitive SAP text";
+  const service = new OrderHistoryService({
+    get: async () => {
+      throw { response: { status: 404 }, message: sensitiveSapMessage };
+    },
+  });
+
+  await assert.rejects(() => service.detail("100001", "1372"), (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "ORDER_NOT_FOUND");
+    assert.equal((error as { httpStatus?: unknown }).httpStatus, 404);
+    assert.doesNotMatch((error as Error).message, /sensitive SAP text/);
+    return true;
+  });
+});
+
 test("sanitizes SAP read errors from list and detail operations", async () => {
   const rawSapMessage = "SAP backend: customer 0000100001 authorization DENIED";
   const failingClient = {

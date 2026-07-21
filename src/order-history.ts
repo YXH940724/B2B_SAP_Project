@@ -171,8 +171,11 @@ function normalizeSalesOrder(input: string): string {
 
 function errorStatus(error: unknown): number | undefined {
   if (typeof error !== "object" || error === null) return undefined;
-  const status = (error as { status?: unknown }).status;
-  return typeof status === "number" ? status : undefined;
+  const { status, response } = error as { status?: unknown; response?: unknown };
+  if (typeof status === "number") return status;
+  if (typeof response !== "object" || response === null) return undefined;
+  const responseStatus = (response as { status?: unknown }).status;
+  return typeof responseStatus === "number" ? responseStatus : undefined;
 }
 
 function orderNotFound(): OrderHistoryError {
