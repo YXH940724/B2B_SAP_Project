@@ -33,7 +33,9 @@ export const CreateSalesOrderSchema = z.object({
   dry_run: z.boolean().default(true),
   confirm: z.literal("CREATE_SALES_ORDER").optional(),
   response_format: ResponseFormat,
-}).merge(PortalCheckoutSchema);
+}).merge(PortalCheckoutSchema).extend({
+  purchase_order_by_ship_to_party: z.string().trim().regex(/^MALL-\d{8}-[A-F0-9]{8}-\d{2}$/).optional(),
+});
 
 export const UpdateSalesOrderSchema = z.object({
   sales_order: SalesOrderId,
@@ -63,6 +65,7 @@ export function createPayload(input: CreateSalesOrderInput): Record<string, unkn
     OrganizationDivision: input.organization_division,
     SoldToParty: input.sold_to_party,
     ...(input.purchase_order_by_customer ? { PurchaseOrderByCustomer: input.purchase_order_by_customer } : {}),
+    ...(input.purchase_order_by_ship_to_party ? { PurchaseOrderByShipToParty: input.purchase_order_by_ship_to_party } : {}),
     ...(input.requested_delivery_date ? { RequestedDeliveryDate: `${input.requested_delivery_date}T00:00:00` } : {}),
     ...(input.customer_payment_terms ? { CustomerPaymentTerms: input.customer_payment_terms } : {}),
     ...(input.incoterms_classification ? { IncotermsClassification: input.incoterms_classification } : {}),
@@ -78,6 +81,25 @@ export function createPayload(input: CreateSalesOrderInput): Record<string, unkn
   };
 }
 
+function odataLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+export async function findSalesOrderByShipToParty(client: SapODataClient, customer: string, childOrderId: string): Promise<string | undefined> {
+  const response = await client.get<unknown>("/A_SalesOrder", {
+    "$select": "SalesOrder,PurchaseOrderByShipToParty,SoldToParty",
+    "$filter": `SoldToParty eq '${odataLiteral(customer)}' and PurchaseOrderByShipToParty eq '${odataLiteral(childOrderId)}'`,
+    "$top": 1,
+  });
+  const data = response.data as {
+    d?: { results?: Array<{ SalesOrder?: unknown }> };
+    results?: Array<{ SalesOrder?: unknown }>;
+    value?: Array<{ SalesOrder?: unknown }>;
+  };
+  const salesOrder = data.d?.results?.[0]?.SalesOrder ?? data.results?.[0]?.SalesOrder ?? data.value?.[0]?.SalesOrder;
+  return typeof salesOrder === "string" && salesOrder ? salesOrder : undefined;
+}
+
 export function assertWriteAllowed(config: SapConfig, confirm: string | undefined, expectedConfirm: string, changes?: Record<string, unknown>): void {
   if (!config.writeEnabled) throw new Error("SAP writes are disabled. Set SAP_WRITE_ENABLED=true only after change approval.");
   if (confirm !== expectedConfirm) throw new Error(`Set confirm to ${expectedConfirm} only after reviewing the requested SAP change.`);
@@ -89,7 +111,7 @@ export function assertWriteAllowed(config: SapConfig, confirm: string | undefine
 
 export async function getSalesOrder(client: SapODataClient, id: string): Promise<{ order: unknown; etag?: string }> {
   const response = await client.get<unknown>(salesOrderPath(id), {
-    "$select": "SalesOrder,SalesOrderType,SalesOrganization,SoldToParty,PurchaseOrderByCustomer,SalesOrderDate,TotalNetAmount,TransactionCurrency,OverallSDProcessStatus,OverallDeliveryStatus,OverallOrdReltdBillgStatus",
+    "$select": "SalesOrder,SalesOrderType,SalesOrganization,SoldToParty,PurchaseOrderByCustomer,PurchaseOrderByShipToParty,SalesOrderDate,TotalNetAmount,TransactionCurrency,OverallSDProcessStatus,OverallDeliveryStatus,OverallOrdReltdBillgStatus",
   });
   return { order: response.data, etag: response.etag };
 }

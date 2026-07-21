@@ -375,11 +375,12 @@ function renderOrderRows(host, orders, emptyText, showDetail = false) {
     return;
   }
   const table = document.createElement("table");
-  table.innerHTML = `<thead><tr><th>订单号</th><th>日期</th><th>订单类型</th><th>客户采购订单号</th><th>销售范围</th><th>整体状态</th><th>交货状态</th><th>开票状态</th><th>金额</th>${showDetail ? "<th>操作</th>" : ""}</tr></thead>`;
+  table.innerHTML = `<thead><tr><th>商城订单号</th><th>订单号</th><th>日期</th><th>订单类型</th><th>客户采购订单号</th><th>销售范围</th><th>整体状态</th><th>交货状态</th><th>开票状态</th><th>金额</th>${showDetail ? "<th>操作</th>" : ""}</tr></thead>`;
   const body = document.createElement("tbody");
   orders.forEach((order) => {
     const row = document.createElement("tr");
     row.append(
+      element("td", "mall-order-id", unmaintained(order.mallOrderChildId)),
       element("td", "", unmaintained(order.salesOrder).replace(/^0+/, "") || unmaintained(order.salesOrder)),
       element("td", "", unmaintained(order.createdAt)),
       element("td", "", unmaintained(order.salesOrderType)),
@@ -511,7 +512,7 @@ function renderOrderDetail(data) {
   summary.append(element("p", "eyebrow", "SAP 销售订单"), element("h3", "", `订单 ${unmaintained(header.salesOrder).replace(/^0+/, "") || unmaintained(header.salesOrder)}`));
   const fields = [
     ["创建日期", header.createdAt], ["销售组织", header.salesOrganization], ["分销渠道", header.distributionChannel], ["产品组", header.division],
-    ["客户采购订单号", header.purchaseOrderByCustomer], ["期望交货日期", header.requestedDeliveryDate], ["付款条款", header.paymentTerms], ["贸易术语", header.incotermsClassification],
+    ["商城订单号", header.mallOrderChildId], ["客户采购订单号", header.purchaseOrderByCustomer], ["期望交货日期", header.requestedDeliveryDate], ["付款条款", header.paymentTerms], ["贸易术语", header.incotermsClassification],
     ["贸易地点", header.incotermsLocation], ["客户采购订单日期", header.customerPurchaseOrderDate], ["创建人", header.createdByUser],
   ];
   const details = element("dl", "order-detail-fields");
@@ -565,7 +566,7 @@ function renderPrintPreview(data) {
   const documentHeader = element("header", "print-document-header");
   documentHeader.append(element("p", "eyebrow", "销售订单 / SALES ORDER"), element("h1", "", `销售订单 ${unmaintained(header.salesOrder).replace(/^0+/, "") || unmaintained(header.salesOrder)}`), element("p", "", `订单日期：${unmaintained(header.createdAt)}`));
   const metadata = element("dl", "print-metadata");
-  [["客户采购订单号", header.purchaseOrderByCustomer], ["销售范围", salesAreaLabel(header)], ["付款条款", header.paymentTerms], ["贸易术语", [header.incotermsClassification, header.incotermsLocation].filter(Boolean).join(" / ")], ["期望交货", header.requestedDeliveryDate]].forEach(([label, value]) => metadata.append(element("dt", "", label), element("dd", "", unmaintained(value))));
+  [["商城订单号", header.mallOrderChildId], ["客户采购订单号", header.purchaseOrderByCustomer], ["销售范围", salesAreaLabel(header)], ["付款条款", header.paymentTerms], ["贸易术语", [header.incotermsClassification, header.incotermsLocation].filter(Boolean).join(" / ")], ["期望交货", header.requestedDeliveryDate]].forEach(([label, value]) => metadata.append(element("dt", "", label), element("dd", "", unmaintained(value))));
   const table = document.createElement("table");
   table.innerHTML = "<thead><tr><th>项目</th><th>物料 / 描述</th><th>数量</th><th>工厂 / 库位</th><th>税务</th><th>净额</th></tr></thead>";
   const body = document.createElement("tbody");
@@ -669,9 +670,11 @@ function checkoutPayload() {
 function renderPreview(preview) {
   const host = $("order-confirmation-summary");
   host.replaceChildren();
+  host.append(element("p", "mall-order-id", `商城订单号：${unmaintained(preview.mallOrderId)}`));
   (preview.groups || []).forEach((group) => {
     const section = element("section", "confirmation-group");
     section.append(element("h3", "", salesAreaLabel(group.salesArea)));
+    section.append(element("p", "mall-order-id", `子单号：${unmaintained(group.childOrderId)}`));
     group.items.forEach((item) => section.append(element("p", "", `${item.productId} × ${item.quantity}　${item.currency || ""} ${Number(item.lineTotal).toFixed(2)}`)));
     section.append(element("p", "group-total", (group.totalsByCurrency || []).map((total) => `${total.currency} ${Number(total.total).toFixed(2)}`).join(" · ")));
     host.append(section);
@@ -679,6 +682,20 @@ function renderPreview(preview) {
   if (preview.checkout.requested_delivery_date) host.append(element("p", "", `期望交货日期：${preview.checkout.requested_delivery_date}`));
   if (preview.checkout.purchase_order_by_customer) host.append(element("p", "", `客户采购订单号：${preview.checkout.purchase_order_by_customer}`));
   if (preview.checkout.portal_note) host.append(element("p", "", "订单备注已记录。"));
+}
+
+function renderOrderResult(data) {
+  const host = $("order-result-summary");
+  host.replaceChildren();
+  host.append(element("p", "mall-order-id", `商城订单号：${unmaintained(data.mallOrderId)}`));
+  const list = element("div", "order-result-list");
+  (data.groups || []).forEach((group) => {
+    const card = element("section", "order-result-card");
+    card.append(element("strong", "", salesAreaLabel(group.salesArea)), element("p", "mall-order-id", `子单号：${unmaintained(group.childOrderId)}`));
+    card.append(group.success ? element("p", "", `SAP 销售订单：${unmaintained(group.salesOrder).replace(/^0+/, "") || unmaintained(group.salesOrder)}`) : element("p", "", unmaintained(group.error) || "创建失败。"));
+    list.append(card);
+  });
+  host.append(list);
 }
 
 $("show-register").addEventListener("click", () => showAuth("register-request-panel"));
@@ -754,6 +771,8 @@ $("print-order-detail").addEventListener("click", () => {
   if (!$("print-preview").open) $("print-preview").showModal();
 });
 $("close-print-preview").addEventListener("click", () => $("print-preview").close());
+$("close-order-result").addEventListener("click", () => $("order-result-dialog").close());
+$("open-orders-from-result").addEventListener("click", async () => { $("order-result-dialog").close(); showView("orders"); await loadOrderCenter(); });
 $("print-preview-button").addEventListener("click", () => window.print());
 $("checkout-button").addEventListener("click", openCheckout);
 $("back-to-cart-button").addEventListener("click", () => { showView("catalog"); $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
@@ -773,11 +792,13 @@ $("confirm-order-button").addEventListener("click", async () => {
   const button = $("confirm-order-button");
   setBusy(button, true, "同步中…");
   try {
-    const data = await api("/api/orders/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...checkoutPayload(), confirm: true }) });
+    const data = await api("/api/orders/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...checkoutPayload(), mallOrderId: lastPreview.mallOrderId, confirm: true }) });
     $("order-confirmation-dialog").close();
     const successful = (data.groups || []).filter((group) => group.success);
     const failed = (data.groups || []).filter((group) => !group.success);
-    portalNote(`SAP 已创建 ${successful.length} 张订单${failed.length ? `；${failed.length} 个销售范围未创建，请修正后重试。` : "。"}`);
+    renderOrderResult(data);
+    $("order-result-dialog").showModal();
+    portalNote(`商城订单 ${data.mallOrderId}：SAP 已创建 ${successful.length} 张订单${failed.length ? `；${failed.length} 个销售范围未创建。` : "。"}`);
     lastPreview = null;
     showView("catalog");
     renderCart();
