@@ -71,8 +71,32 @@ export type PaginatedOrderHistory = {
 };
 
 export type OrderDetail = {
-  header: OrderSummary & { requestedDeliveryDate: string | null; customerPurchaseOrderDate: string | null; createdByUser: string | null };
-  items: Array<{ item: string; material: string | null; description: string | null; quantity: number; unit: string | null; netPrice: number | null; netAmount: number; currency: string | null; deliveryStatus: OrderStatus }>;
+  header: OrderSummary & {
+    requestedDeliveryDate: string | null;
+    customerPurchaseOrderDate: string | null;
+    createdByUser: string | null;
+    paymentTerms: string | null;
+    incotermsClassification: string | null;
+    incotermsVersion: string | null;
+    incotermsLocation: string | null;
+  };
+  items: Array<{
+    item: string;
+    material: string | null;
+    description: string | null;
+    quantity: number;
+    unit: string | null;
+    netPrice: number | null;
+    netAmount: number;
+    currency: string | null;
+    deliveryStatus: OrderStatus;
+    customerMaterial: string | null;
+    productionPlant: string | null;
+    storageLocation: string | null;
+    taxCode: string | null;
+    taxRate: number | null;
+    taxAmount: number | null;
+  }>;
 };
 
 export type OrderHistoryErrorCode = "ORDER_NOT_FOUND" | "SAP_READ_FAILED";
@@ -311,6 +335,10 @@ function toDetailHeader(row: Record<string, unknown>): OrderDetail["header"] {
     requestedDeliveryDate: optionalCreatedAt(row.RequestedDeliveryDate),
     customerPurchaseOrderDate: optionalCreatedAt(row.CustomerPurchaseOrderDate),
     createdByUser: optionalText(row.CreatedByUser),
+    paymentTerms: optionalText(row.CustomerPaymentTerms),
+    incotermsClassification: optionalText(row.IncotermsClassification),
+    incotermsVersion: optionalText(row.IncotermsVersion),
+    incotermsLocation: optionalText(row.IncotermsTransferLocation),
   };
 }
 
@@ -325,7 +353,47 @@ function toOrderLine(row: Record<string, unknown>): OrderDetail["items"][number]
     netAmount: amount(row.NetAmount),
     currency: optionalText(row.TransactionCurrency),
     deliveryStatus: status(row.OverallDeliveryStatus),
+    customerMaterial: optionalText(row.MaterialByCustomer),
+    productionPlant: optionalText(row.ProductionPlant),
+    storageLocation: optionalText(row.StorageLocation),
+    taxCode: optionalText(row.TaxCode),
+    taxRate: optionalAmount(row.TaxRate),
+    taxAmount: optionalAmount(row.TaxAmount),
   };
+}
+
+type PricingTax = Pick<OrderDetail["items"][number], "taxCode" | "taxRate" | "taxAmount">;
+
+function pricingTaxesByItem(value: unknown): Map<string, PricingTax> {
+  const taxes = new Map<string, PricingTax>();
+  rows(value).forEach((row) => {
+    const item = text(row.SalesOrderItem);
+    const taxCode = optionalText(row.TaxCode);
+    if (!item || !taxCode) return;
+    const existing = taxes.get(item);
+    const amount = optionalAmount(row.ConditionAmount);
+    taxes.set(item, {
+      taxCode,
+      taxRate: existing?.taxRate ?? optionalAmount(row.ConditionRateValue),
+      taxAmount: existing?.taxAmount === null || existing?.taxAmount === undefined
+        ? amount
+        : amount === null ? existing.taxAmount : existing.taxAmount + amount,
+    });
+  });
+  return taxes;
+}
+
+async function readPricingTaxes(client: ODataReader, salesOrder: string): Promise<Map<string, PricingTax>> {
+  try {
+    const response = await client.get<unknown>("/A_SalesOrderItemPrElement", {
+      "$filter": `SalesOrder eq '${salesOrder}'`,
+      "$select": "SalesOrder,SalesOrderItem,ConditionType,TaxCode,ConditionRateValue,ConditionAmount,ConditionCurrency",
+      "$top": 1000,
+    });
+    return pricingTaxesByItem(response.data);
+  } catch {
+    return new Map();
+  }
 }
 
 export class OrderHistoryService {
@@ -363,6 +431,14 @@ export class OrderHistoryService {
     const header = await readOrderData(() => this.client.get<Record<string, unknown>>(`/A_SalesOrder('${salesOrder}')`), true);
     if (normalizeCustomer(text(header.data.SoldToParty)) !== customer) throw orderNotFound();
     const lines = await readOrderData(() => this.client.get<unknown>(`/A_SalesOrder('${salesOrder}')/to_Item`));
-    return { header: toDetailHeader(header.data), items: rows(lines.data).map(toOrderLine) };
+    const taxes = await readPricingTaxes(this.client, salesOrder);
+    return {
+      header: toDetailHeader(header.data),
+      items: rows(lines.data).map((row) => {
+        const item = toOrderLine(row);
+        const tax = taxes.get(item.item);
+        return tax ? { ...item, ...tax } : item;
+      }),
+    };
   }
 }

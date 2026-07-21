@@ -98,11 +98,16 @@ function makeClient() {
           },
         };
       }
+      if (path === "/A_ProductDescription") {
+        const filter = String(params?.["$filter"] ?? "");
+        if (filter.includes("000000000000001386")) return { data: { results: [{ ProductDescription: "演示物料" }] } };
+        return { data: { results: [] } };
+      }
       if (path === "/A_Product('000000000000001386')") {
-        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC" } };
       }
       if (path === "/A_Product('000000000000001387')") {
-        return { data: { Product: "000000000000001387", BaseUnit: "EA", to_Description: { results: [] } } };
+        return { data: { Product: "000000000000001387", BaseUnit: "EA" } };
       }
       throw new Error(`Unexpected OData request: ${path}`);
     },
@@ -123,6 +128,8 @@ test("lists only current A305 PR00 products with product details and pagination"
   assert.deepEqual(page.items[0], {
     product: "000000000000001386",
     description: "演示物料",
+    descriptionLanguage: "ZH",
+    descriptionFallback: false,
     productGroup: "FG",
     baseUnit: "PC",
     conditionRecord: "0000000123",
@@ -139,6 +146,23 @@ test("filters a catalog by material group and a material-number-or-description q
   const fallback = await catalog.list("0000100001", salesArea, { query: "1387", group: "UNCLASSIFIED", page: 1, pageSize: 20, sort: "material" });
   assert.equal(fallback.items.length, 1);
   assert.equal(fallback.items[0].description, "000000000000001387");
+});
+
+test("uses the requested language when reading catalog product descriptions", async () => {
+  const descriptionFilters: string[] = [];
+  const base = makeClient();
+  const client = {
+    getAt: async (service: string, path: string, params?: Record<string, string | number | undefined>) => {
+      if (path === "/A_ProductDescription") descriptionFilters.push(String(params?.["$filter"]));
+      return base.getAt(service, path, params);
+    },
+  };
+  const catalog = new CatalogService(client as never, config, () => new Date("2026-07-20T00:00:00Z"));
+
+  await catalog.list("0000100001", salesArea, { page: 1, pageSize: 20, sort: "material" }, "EN");
+
+  assert.ok(descriptionFilters.length > 0);
+  assert.ok(descriptionFilters.every((filter) => filter.includes("Language eq 'EN'")));
 });
 
 test("keeps only prices matching the customer and selected sales area", async () => {
@@ -171,8 +195,9 @@ test("loads A305 condition records before looking up their scoped price validiti
       if (path === "/A_SlsPrcgCndnRecdValidity") {
         return { data: { results: [{ Material: "000000000000001386", Customer: "0000100001", SalesOrganization: "1310", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
       }
+      if (path === "/A_ProductDescription") return { data: { results: [{ ProductDescription: "演示物料" }] } };
       if (path === "/A_Product('000000000000001386')") {
-        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC" } };
       }
       throw new Error(`Unexpected request ${path}`);
     },
@@ -212,7 +237,8 @@ test("accepts SAP price-validity customer numbers returned without leading zeroe
     getAt: async (_service: string, path: string) => {
       if (path === "/A_SlsPrcgConditionRecord") return { data: { results: [{ ConditionRecord: "0000000123", ConditionTable: "305", ConditionRateValue: "30.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "PC", ConditionIsDeleted: false }] } };
       if (path === "/A_SlsPrcgCndnRecdValidity") return { data: { results: [{ Material: "000000000000001386", Customer: "100001", SalesOrganization: "1310", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
-      if (path === "/A_Product('000000000000001386')") return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+      if (path === "/A_ProductDescription") return { data: { results: [{ ProductDescription: "演示物料" }] } };
+      if (path === "/A_Product('000000000000001386')") return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC" } };
       throw new Error(`Unexpected request ${path}`);
     },
   };

@@ -29,6 +29,8 @@ interface PriceConditionRecord {
 export interface CatalogItem {
   product: string;
   description: string;
+  descriptionLanguage: string;
+  descriptionFallback: boolean;
   productGroup: string;
   baseUnit: string;
   conditionRecord: string;
@@ -116,11 +118,11 @@ async function mapWithConcurrency<T, R>(values: T[], limit: number, mapper: (val
 export class CatalogService {
   constructor(private readonly client: SapODataClient, private readonly config: SapConfig, private readonly clock: () => Date = () => new Date()) {}
 
-  async list(customerInput: string, salesArea: SalesArea, query: CatalogQuery): Promise<CatalogPage> {
+  async list(customerInput: string, salesArea: SalesArea, query: CatalogQuery, language = "ZH"): Promise<CatalogPage> {
     const prices = await this.listCurrentPrices(normalizeCustomer(customerInput), salesArea);
     const detailEntries = await mapWithConcurrency([...prices.values()], 8, async (price) => {
       try {
-        return { price, detail: await getProductDetails(this.client, this.config, price.material) };
+        return { price, detail: await getProductDetails(this.client, this.config, price.material, language) };
       } catch {
         return undefined;
       }
@@ -136,7 +138,7 @@ export class CatalogService {
     return { items: sorted.slice((page - 1) * query.pageSize, page * query.pageSize), groups, page, pageSize: query.pageSize, total, pageCount };
   }
 
-  async getOffer(customerInput: string, salesArea: SalesArea, product: string): Promise<CatalogItem> {
+  async getOffer(customerInput: string, salesArea: SalesArea, product: string, language = "ZH"): Promise<CatalogItem> {
     const customer = normalizeCustomer(customerInput);
     const records = await this.listA305Records();
     const response = await this.client.getAt<ODataResults<PriceValidity>>(this.config.services.pricing, "/A_SlsPrcgCndnRecdValidity", {
@@ -146,7 +148,7 @@ export class CatalogService {
     const price = (response.data.results ?? []).filter((row) => matchesScope(row, customer, salesArea)).map((row) => currentA305Price(row, records.get(row.ConditionRecord ?? ""), this.clock())).filter((value): value is CurrentPrice => Boolean(value))
       .reduce<CurrentPrice | undefined>((selected, candidate) => preferPrice(selected, candidate), undefined);
     if (!price) throw new Error("This product has no current ZR01 price in condition table A305 and cannot be ordered.");
-    return toCatalogItem(price, await getProductDetails(this.client, this.config, price.material));
+    return toCatalogItem(price, await getProductDetails(this.client, this.config, price.material, language));
   }
 
   private async listCurrentPrices(customer: string, salesArea: SalesArea): Promise<Map<string, CurrentPrice>> {
@@ -203,7 +205,7 @@ function matchesScope(row: PriceValidity, customer: string, salesArea: SalesArea
 }
 
 function toCatalogItem(price: CurrentPrice, detail: ProductDetails): CatalogItem {
-  return { product: detail.product, description: detail.description, productGroup: detail.productGroup, baseUnit: detail.baseUnit, conditionRecord: price.conditionRecord, unitPrice: price.unitPrice, currency: price.currency, priceUnit: price.priceUnit };
+  return { product: detail.product, description: detail.description, descriptionLanguage: detail.descriptionLanguage, descriptionFallback: detail.descriptionFallback, productGroup: detail.productGroup, baseUnit: detail.baseUnit, conditionRecord: price.conditionRecord, unitPrice: price.unitPrice, currency: price.currency, priceUnit: price.priceUnit };
 }
 
 function groupCounts(items: CatalogItem[]): CatalogPage["groups"] {

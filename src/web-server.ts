@@ -9,6 +9,8 @@ import { SapODataClient } from "./odata-client.js";
 import { createPortalApp } from "./portal-app.js";
 import { listCustomerSalesAreas } from "./sales-areas.js";
 import { getCustomer360 } from "./customer-360.js";
+import { getProductFulfillmentOptions } from "./master-data.js";
+import { getOrderDefaults } from "./order-defaults.js";
 import { OrderHistoryService } from "./order-history.js";
 import { createVerificationDelivery, type VerificationDelivery } from "./verification-delivery.js";
 
@@ -20,6 +22,8 @@ export function createConfiguredPortalApp(config: ReturnType<typeof loadConfig>,
     delivery: options.delivery ?? createVerificationDelivery(process.env),
     order: { config, client },
     catalog: new CatalogService(client, config),
+    orderDefaults: { get: (customer, salesArea) => getOrderDefaults(client, config, customer, salesArea) },
+    fulfillment: { get: (product) => getProductFulfillmentOptions(client, config, product) },
     salesAreas: { list: (customer) => listCustomerSalesAreas(client, config, customer) },
     customer: { get: (customer) => getCustomerPortalProfile(client, config, customer) },
     customer360: { get: (customer) => getCustomer360(client, config, customer) },

@@ -6,6 +6,7 @@
   <title>SAP 客户订货商城</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/order-center.css">
+  <link rel="stylesheet" href="/order-workbench.css">
   <link rel="stylesheet" href="/view-visibility.css">
 </head>
 <body>
@@ -63,7 +64,7 @@
         <section id="catalog" aria-label="商品目录">
           <div class="catalog-heading">
             <div><p class="eyebrow">商品目录</p><h1>有效价格物料</h1><p id="catalog-count">加载中…</p></div>
-            <div class="catalog-filters"><label>销售范围<select id="sales-area-select" aria-label="销售范围"></select></label><label>排序<select id="catalog-sort"><option value="material">按物料号</option><option value="price">按价格</option></select></label></div>
+            <div class="catalog-filters"><label>销售范围<select id="sales-area-select" aria-label="销售范围"></select></label><label>描述语言<select id="catalog-language" aria-label="物料描述语言"><option value="ZH">中文</option><option value="EN">English</option></select></label><label>排序<select id="catalog-sort"><option value="material">按物料号</option><option value="price">按价格</option></select></label></div>
           </div>
           <form id="catalog-search-form" class="catalog-search">
             <input id="catalog-search" type="search" placeholder="搜索物料号或物料描述" autocomplete="off">
@@ -80,14 +81,23 @@
         </aside>
       </div>
 
-      <section id="view-order-entry" class="checkout-panel" hidden>
-        <div><p class="eyebrow">销售订单</p><h2>订单录入</h2><p>按 SAP 销售订单的抬头与行项目结构确认后提交。</p></div>
-        <form id="order-header-form">
-          <label>期望交货日期<input id="requested-delivery-date" type="date"></label>
-          <label>客户采购订单号 / 参考号<input id="purchase-order-by-customer" maxlength="35" placeholder="可选"></label>
-          <label class="wide">订单备注<textarea id="portal-note" maxlength="500" placeholder="可选，最多 500 字"></textarea></label>
-          <div id="order-line-items" class="wide" aria-label="订单行项目"><div id="order-entry-groups"></div></div>
-          <div class="checkout-actions"><button type="button" id="back-to-cart-button" class="text-button">返回购物车</button><button>查看订单摘要</button></div>
+      <section id="view-order-entry" class="order-workbench" hidden>
+        <header class="order-workbench-hero"><div><p class="eyebrow">销售订单</p><h2>订单录入工作台</h2><p>按销售范围维护 SAP 销售订单表头与行项目。条款默认来自客户主数据，提交前可调整。</p></div><span class="sales-area-tag">购物车内容保持不变</span></header>
+        <form id="order-header-form" class="order-workbench-form">
+          <section class="order-header-card" aria-label="订单表头">
+            <div class="section-title"><div><p class="eyebrow">订单表头</p><h3>商业与交付条款</h3></div><span>默认值来自 SAP 客户主数据</span></div>
+            <div class="order-header-fields">
+              <label>付款条款<input id="customer-payment-terms" maxlength="4" placeholder="SAP 默认值"></label>
+              <label>国际贸易条款<input id="incoterms-classification" maxlength="3" placeholder="例如 FOB"></label>
+              <label>版本<input id="incoterms-version" maxlength="4" placeholder="例如 2020"></label>
+              <label>贸易地点<input id="incoterms-location" maxlength="70" placeholder="SAP 默认值"></label>
+              <label>期望交货日期<input id="requested-delivery-date" type="date"></label>
+              <label>客户采购订单号 / 参考号<input id="purchase-order-by-customer" maxlength="35" placeholder="可选"></label>
+              <label class="field-span-all">订单备注<textarea id="portal-note" maxlength="500" placeholder="可选，最多 500 字"></textarea></label>
+            </div>
+          </section>
+          <section id="order-line-items" class="order-line-items" aria-label="订单行项目"><div class="section-title"><div><p class="eyebrow">订单行项目</p><h3>物料、履约与税务预览</h3></div><span>税率与税额以 SAP 定价结果为准</span></div><div id="order-entry-groups"></div></section>
+          <aside class="order-workbench-summary" aria-label="订单金额汇总"><p class="eyebrow">金额汇总</p><h3>待提交订单</h3><div id="order-workbench-totals"></div><p class="summary-note">将按销售范围拆分为独立 SAP 销售订单。</p><div class="checkout-actions"><button type="button" id="back-to-cart-button" class="text-button">返回购物车</button><button>查看订单摘要</button></div></aside>
         </form>
       </section>
 
@@ -126,9 +136,13 @@
     <div class="dialog-actions"><button id="cancel-order-button" type="button" class="text-button">返回修改</button><button id="confirm-order-button" type="button">确认并同步至 SAP</button></div>
   </dialog>
   <dialog id="order-detail-dialog" class="order-detail-dialog" aria-labelledby="order-detail-title">
-    <div class="order-detail-dialog-header"><h2 id="order-detail-title">SAP 销售订单明细</h2><button id="close-order-detail" type="button" class="text-button" aria-label="关闭订单明细">关闭</button></div>
+    <div class="order-detail-dialog-header"><h2 id="order-detail-title">SAP 销售订单明细</h2><div class="detail-dialog-actions"><button id="print-order-detail" type="button" class="text-button">打印 / 预览</button><button id="close-order-detail" type="button" class="text-button" aria-label="关闭订单明细">关闭</button></div></div>
     <div id="order-detail-header"></div>
     <div id="order-detail-lines" aria-label="订单行项目"></div>
+  </dialog>
+  <dialog id="print-preview" class="print-preview" aria-labelledby="print-preview-title">
+    <div class="order-detail-dialog-header"><h2 id="print-preview-title">销售订单打印预览</h2><div class="detail-dialog-actions"><button id="print-preview-button" type="button">打印</button><button id="close-print-preview" type="button" class="text-button">关闭</button></div></div>
+    <article id="print-preview-content" class="print-preview-content"></article>
   </dialog>
   <script src="/app.js"></script>
 </body>

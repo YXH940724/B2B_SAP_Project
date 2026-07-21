@@ -103,6 +103,45 @@ function fakeMixedCurrencyOrders() {
   };
 }
 
+function fakeStructuredOrderDetail() {
+  return {
+    get: async (path: string) => {
+      if (path === "/A_SalesOrder('0000001372')") {
+        return { data: {
+          SalesOrder: "0000001372", SoldToParty: "0000100001", SalesOrderType: "OR", CreationDate: "2026-07-01",
+          SalesOrganization: "1310", DistributionChannel: "10", OrganizationDivision: "00", TotalNetAmount: "100", TransactionCurrency: "CNY",
+          CustomerPaymentTerms: "0001", IncotermsClassification: "FOB", IncotermsVersion: "2020", IncotermsTransferLocation: "上海",
+        } };
+      }
+      assert.equal(path, "/A_SalesOrder('0000001372')/to_Item");
+      return { data: { results: [{
+        SalesOrderItem: "000010", Material: "000000000000001386", SalesOrderItemText: "工业零件", RequestedQuantity: "2", RequestedQuantityUnit: "PC",
+        NetPriceAmount: "50", NetAmount: "100", TransactionCurrency: "CNY", OverallDeliveryStatus: "B",
+        MaterialByCustomer: "CUST-1386", ProductionPlant: "1310", StorageLocation: "0001", TaxCode: "J0", TaxRate: "13", TaxAmount: "13",
+      }] } };
+    },
+  };
+}
+
+function fakeOrderDetailWithPricingElements() {
+  return {
+    get: async (path: string, params?: Record<string, string | number | undefined>) => {
+      if (path === "/A_SalesOrder('0000001372')") {
+        return { data: { SalesOrder: "0000001372", SoldToParty: "0000100001", SalesOrderType: "OR", CreationDate: "2026-07-01", SalesOrganization: "1310", DistributionChannel: "10", OrganizationDivision: "00", TotalNetAmount: "100", TransactionCurrency: "CNY" } };
+      }
+      if (path === "/A_SalesOrder('0000001372')/to_Item") {
+        return { data: { results: [{ SalesOrderItem: "000010", Material: "000000000000001386", RequestedQuantity: "2", RequestedQuantityUnit: "PC", NetAmount: "100", TransactionCurrency: "CNY" }] } };
+      }
+      assert.equal(path, "/A_SalesOrderItemPrElement");
+      assert.match(String(params?.$filter), /SalesOrder eq '0000001372'/);
+      return { data: { results: [
+        { SalesOrderItem: "000010", ConditionType: "ZR01", ConditionAmount: "100" },
+        { SalesOrderItem: "000010", ConditionType: "ZWSI", TaxCode: "J0", ConditionRateValue: "13", ConditionAmount: "13" },
+      ] } };
+    },
+  };
+}
+
 test("filters only the logged-in customer's orders and paginates the mapped SAP rows", async () => {
   const client = fakeSapOrders();
   const service = new OrderHistoryService(client, () => new Date("2026-07-21T00:00:00.000Z"));
@@ -214,6 +253,10 @@ test("maps unmaintained optional SAP header and line fields to null", async () =
   assert.equal(detail.header.requestedDeliveryDate, null);
   assert.equal(detail.header.customerPurchaseOrderDate, null);
   assert.equal(detail.header.createdByUser, null);
+  assert.equal(detail.header.paymentTerms, null);
+  assert.equal(detail.header.incotermsClassification, null);
+  assert.equal(detail.header.incotermsVersion, null);
+  assert.equal(detail.header.incotermsLocation, null);
   assert.deepEqual(detail.items[0], {
     item: "000010",
     material: null,
@@ -224,7 +267,37 @@ test("maps unmaintained optional SAP header and line fields to null", async () =
     netAmount: 200,
     currency: null,
     deliveryStatus: { code: "A", label: "未处理", tone: "neutral" },
+    customerMaterial: null,
+    productionPlant: null,
+    storageLocation: null,
+    taxCode: null,
+    taxRate: null,
+    taxAmount: null,
   });
+});
+
+test("maps SAP order terms and fulfillment fields into a structured order detail", async () => {
+  const service = new OrderHistoryService(fakeStructuredOrderDetail());
+
+  const detail = await service.detail("100001", "1372");
+
+  assert.equal(detail.header.paymentTerms, "0001");
+  assert.equal(detail.header.incotermsClassification, "FOB");
+  assert.equal(detail.header.incotermsVersion, "2020");
+  assert.equal(detail.header.incotermsLocation, "上海");
+  assert.deepEqual(detail.items[0], {
+    item: "000010", material: "000000000000001386", description: "工业零件", quantity: 2, unit: "PC", netPrice: 50,
+    netAmount: 100, currency: "CNY", deliveryStatus: { code: "B", label: "处理中", tone: "warning" },
+    customerMaterial: "CUST-1386", productionPlant: "1310", storageLocation: "0001", taxCode: "J0", taxRate: 13, taxAmount: 13,
+  });
+});
+
+test("derives item tax rate and amount from read-only SAP pricing elements", async () => {
+  const detail = await new OrderHistoryService(fakeOrderDetailWithPricingElements()).detail("100001", "1372");
+
+  assert.equal(detail.items[0].taxCode, "J0");
+  assert.equal(detail.items[0].taxRate, 13);
+  assert.equal(detail.items[0].taxAmount, 13);
 });
 
 test("keeps CNY and USD dashboard and sales-organization totals separate", async () => {

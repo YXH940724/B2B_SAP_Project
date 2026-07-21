@@ -112,7 +112,11 @@ def run() -> None:
         elif path == "/api/sales-areas":
             fulfill_json(route, [{"key": "1310/10/00", "salesOrganization": "1310", "distributionChannel": "10", "division": "00"}])
         elif path == "/api/catalog":
-            fulfill_json(route, {"items": [], "groups": [], "page": 1, "pageSize": 20, "total": 0, "pageCount": 0})
+            fulfill_json(route, {"items": [{"product": "000000000000001386", "description": "模拟可销物料", "descriptionLanguage": "ZH", "descriptionFallback": False, "productGroup": "FG", "baseUnit": "PC", "conditionRecord": "0000000123", "unitPrice": "30", "currency": "CNY", "priceUnit": "PC"}], "groups": [{"code": "FG", "label": "FG", "count": 1}], "page": 1, "pageSize": 20, "total": 1, "pageCount": 1})
+        elif path == "/api/order-defaults":
+            fulfill_json(route, {"paymentTerms": "0001", "incotermsClassification": "FOB", "incotermsVersion": "2020", "incotermsLocation": "上海"})
+        elif path == "/api/products/000000000000001386/fulfillment":
+            fulfill_json(route, {"product": "000000000000001386", "defaultPlant": "1310", "plants": ["1310"], "storageLocationsByPlant": {"1310": ["0001", "0002"]}})
         elif path == "/api/orders/history":
             observed_history_urls.append(route.request.url)
             if query.get("query") == ["没有匹配"]:
@@ -140,6 +144,18 @@ def run() -> None:
             page.locator("#password").fill("mock-password")
             page.get_by_role("button", name="登录").click()
             page.get_by_role("link", name="订单中心").wait_for(state="visible")
+
+            page.get_by_role("button", name="加入购物车").click()
+            page.get_by_role("button", name="去结算").click()
+            page.locator("#view-order-entry").wait_for(state="visible")
+            expect(page.locator("#customer-payment-terms")).to_have_value("0001")
+            expect(page.locator("#incoterms-classification")).to_have_value("FOB")
+            expect(page.locator("#incoterms-version")).to_have_value("2020")
+            expect(page.locator("#order-entry-groups thead")).to_contain_text("客户料号")
+            expect(page.locator("#order-entry-groups thead")).to_contain_text("工厂")
+            expect(page.locator("#order-entry-groups thead")).to_contain_text("税务预览")
+            expect(page.locator("#order-entry-groups select").first).to_have_value("1310")
+            page.get_by_role("button", name="返回购物车").click()
 
             page.get_by_role("link", name="订单中心").click()
             page.locator("#order-list tbody tr").first.wait_for(state="visible")
@@ -179,6 +195,10 @@ def run() -> None:
             page.locator("#order-detail-dialog").wait_for(state="visible")
             expect(page.locator("#order-detail-lines tbody tr")).to_have_count(2)
             assert "模拟物料一" in page.locator("#order-detail-dialog").inner_text()
+            page.get_by_role("button", name="打印 / 预览").click()
+            page.locator("#print-preview").wait_for(state="visible")
+            expect(page.locator("#print-preview-content")).to_contain_text("模拟物料一")
+            page.get_by_role("button", name="关闭").last.click()
             page.screenshot(path=str(SCREENSHOT_PATH), full_page=True)
 
             page.get_by_role("button", name="关闭订单明细").click()
