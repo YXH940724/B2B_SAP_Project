@@ -65,6 +65,16 @@ export type OrderDetail = {
   items: Array<{ item: string; material: string; description: string; quantity: number; unit: string; netPrice: number; netAmount: number; currency: string; deliveryStatus: OrderStatus }>;
 };
 
+export type OrderHistoryErrorCode = "ORDER_NOT_FOUND" | "SAP_READ_FAILED";
+
+/** A safe, route-ready error contract for order-history reads. */
+export class OrderHistoryError extends Error {
+  constructor(readonly code: OrderHistoryErrorCode, readonly httpStatus: 404 | 502, message: string) {
+    super(message);
+    this.name = "OrderHistoryError";
+  }
+}
+
 /** @deprecated Use PaginatedOrderHistory. */
 export type CustomerOrderHistory = PaginatedOrderHistory;
 
@@ -133,6 +143,29 @@ function normalizeSalesOrder(input: string): string {
   const salesOrder = input.trim();
   if (!/^\d{1,10}$/.test(salesOrder)) throw new Error("订单号无效。");
   return salesOrder.padStart(10, "0");
+}
+
+function errorStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+}
+
+function orderNotFound(): OrderHistoryError {
+  return new OrderHistoryError("ORDER_NOT_FOUND", 404, "订单不存在。");
+}
+
+function sapReadFailed(): OrderHistoryError {
+  return new OrderHistoryError("SAP_READ_FAILED", 502, "暂时无法读取订单数据，请稍后重试。");
+}
+
+async function readOrderData<T>(operation: () => Promise<T>, missingOn404 = false): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (missingOn404 && errorStatus(error) === 404) throw orderNotFound();
+    throw sapReadFailed();
+  }
 }
 
 function toOrderSummary(row: Record<string, unknown>): OrderSummary {
@@ -251,11 +284,11 @@ export class OrderHistoryService {
   async list(customerInput: string, input: Partial<OrderQuery> = {}): Promise<PaginatedOrderHistory> {
     const customer = normalizeCustomer(customerInput);
     const query = normalizeQuery(input);
-    const response = await this.client.get<unknown>("/A_SalesOrder", {
+    const response = await readOrderData(() => this.client.get<unknown>("/A_SalesOrder", {
       "$filter": `SoldToParty eq '${customer}'`,
       "$orderby": "CreationDate desc",
       "$top": 200,
-    });
+    }));
     const now = this.now();
     const all = rows(response.data)
       .filter((row) => normalizeCustomer(text(row.SoldToParty)) === customer)
@@ -277,9 +310,9 @@ export class OrderHistoryService {
   async detail(customerInput: string, salesOrderInput: string): Promise<OrderDetail> {
     const customer = normalizeCustomer(customerInput);
     const salesOrder = normalizeSalesOrder(salesOrderInput);
-    const header = await this.client.get<Record<string, unknown>>(`/A_SalesOrder('${salesOrder}')`);
-    if (normalizeCustomer(text(header.data.SoldToParty)) !== customer) throw new Error("订单不存在。");
-    const lines = await this.client.get<unknown>(`/A_SalesOrder('${salesOrder}')/to_Item`);
+    const header = await readOrderData(() => this.client.get<Record<string, unknown>>(`/A_SalesOrder('${salesOrder}')`), true);
+    if (normalizeCustomer(text(header.data.SoldToParty)) !== customer) throw orderNotFound();
+    const lines = await readOrderData(() => this.client.get<unknown>(`/A_SalesOrder('${salesOrder}')/to_Item`));
     return { header: toDetailHeader(header.data), items: rows(lines.data).map(toOrderLine) };
   }
 }

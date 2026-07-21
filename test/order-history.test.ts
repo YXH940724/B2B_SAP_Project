@@ -59,5 +59,55 @@ test("filters only the logged-in customer's orders and paginates the mapped SAP 
 test("rejects an order detail whose SAP sold-to party differs from the session customer", async () => {
   const service = new OrderHistoryService(fakeForeignOrderDetail());
 
-  await assert.rejects(() => service.detail("100001", "1372"), /订单不存在/);
+  await assert.rejects(() => service.detail("100001", "1372"), (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "ORDER_NOT_FOUND");
+    assert.equal((error as { httpStatus?: unknown }).httpStatus, 404);
+    assert.equal((error as Error).message, "订单不存在。");
+    return true;
+  });
+});
+
+test("maps a missing SAP order detail to the same safe 404 error contract", async () => {
+  const service = new OrderHistoryService({
+    get: async () => {
+      throw Object.assign(new Error("SAP: Sales order 0000001372 does not exist"), { status: 404 });
+    },
+  });
+
+  await assert.rejects(() => service.detail("100001", "1372"), (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "ORDER_NOT_FOUND");
+    assert.equal((error as { httpStatus?: unknown }).httpStatus, 404);
+    assert.equal((error as Error).message, "订单不存在。");
+    return true;
+  });
+});
+
+test("sanitizes SAP read errors from list and detail operations", async () => {
+  const rawSapMessage = "SAP backend: customer 0000100001 authorization DENIED";
+  const failingClient = {
+    get: async (path: string) => {
+      if (path === "/A_SalesOrder('0000001372')") {
+        return { data: { SalesOrder: "0000001372", SoldToParty: "0000100001" } };
+      }
+      throw new Error(rawSapMessage);
+    },
+  };
+
+  const listService = new OrderHistoryService(failingClient);
+  await assert.rejects(() => listService.list("100001"), (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "SAP_READ_FAILED");
+    assert.equal((error as { httpStatus?: unknown }).httpStatus, 502);
+    assert.equal((error as Error).message, "暂时无法读取订单数据，请稍后重试。");
+    assert.doesNotMatch((error as Error).message, /SAP backend|0000100001|DENIED/);
+    return true;
+  });
+
+  const detailService = new OrderHistoryService(failingClient);
+  await assert.rejects(() => detailService.detail("100001", "1372"), (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "SAP_READ_FAILED");
+    assert.equal((error as { httpStatus?: unknown }).httpStatus, 502);
+    assert.equal((error as Error).message, "暂时无法读取订单数据，请稍后重试。");
+    assert.doesNotMatch((error as Error).message, /SAP backend|0000100001|DENIED/);
+    return true;
+  });
 });
