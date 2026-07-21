@@ -45,6 +45,16 @@ test("maps purchase reference and requested delivery date into the SAP payload",
   assert.equal(payload.RequestedDeliveryDate, "2026-08-01T00:00:00");
 });
 
+test("writes the marketplace child ID to the SAP ship-to purchase reference", () => {
+  const payload = createPayload({
+    sales_order_type: "OR", sales_organization: "1310", distribution_channel: "10", organization_division: "00", sold_to_party: "0000100001",
+    purchase_order_by_ship_to_party: "MALL-20260721-ABCDEF12-01",
+    items: [{ material: "361", requested_quantity: 1, requested_quantity_unit: "PC" }],
+    dry_run: false, response_format: "json",
+  });
+  assert.equal(payload.PurchaseOrderByShipToParty, "MALL-20260721-ABCDEF12-01");
+});
+
 test("maps order terms and fulfillment data without an Incoterms version", () => {
   const payload = createPayload({
     sales_order_type: "OR", sales_organization: "1310", distribution_channel: "10", organization_division: "00", sold_to_party: "100001",
