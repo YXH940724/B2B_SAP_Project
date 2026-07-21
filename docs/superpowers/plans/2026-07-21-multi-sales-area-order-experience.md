@@ -88,7 +88,9 @@ git commit -m "[AI-IMP]订单完整销售范围筛选"
 ### Task 2: 按销售范围分组的预览与 SAP 提交
 
 **Files:**
+- Modify: `src/catalog.ts`
 - Modify: `src/portal-app.ts`
+- Modify: `test/catalog.test.ts`
 - Modify: `test/portal-app.test.ts`
 
 **Interfaces:**
@@ -127,6 +129,8 @@ function groupCartLines(lines: PortalCartLine[]): Map<string, { salesArea: Sales
 
 为每个组执行 `selectedSalesArea(customer, line)`、`getSellableOffer` 与 `createPayload`。提交结果使用 `Promise.all` 收集，每组返回自己的成功或错误，已成功组不因其他组失败而回滚或重复提交。若所有组失败，端点返回 400；至少一组成功则返回 200 且含完整组结果。
 
+同时移除 `src/catalog.ts` 中将销售组织强制覆盖为 `1310` 的 `pricingSalesArea` 行为，让 `listCurrentPrices` 和 `getOffer` 都直接使用已验证的完整 `SalesArea`。在 `test/catalog.test.ts` 中增加第二个销售组织的有效记录，并断言请求 `$filter` 含所选销售组织、分销渠道及客户号。
+
 - [ ] **Step 4: 增加部分成功与外部销售范围拒绝测试**
 
 ```ts
@@ -141,7 +145,7 @@ Run: `npm test -- test/portal-app.test.ts`
 Expected: PASS。
 
 ```bash
-git add src/portal-app.ts test/portal-app.test.ts
+git add src/catalog.ts src/portal-app.ts test/catalog.test.ts test/portal-app.test.ts
 git commit -m "[AI-ADD]销售范围拆分下单"
 ```
 
