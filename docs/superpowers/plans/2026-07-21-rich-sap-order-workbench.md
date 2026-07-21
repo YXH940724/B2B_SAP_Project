@@ -179,6 +179,14 @@ function sortOrders(orders: OrderSummary[], sort: OrderQuery["sort"]): OrderSumm
   const value = (order: OrderSummary) => sort.startsWith("total") ? order.total : order.createdAt;
   return [...orders].sort((left, right) => value(left) < value(right) ? -multiplier : value(left) > value(right) ? multiplier : 0);
 }
+
+function toDetailHeader(row: Record<string, unknown>): OrderDetail["header"] {
+  return { ...toOrderSummary(row), requestedDeliveryDate: createdAt(row.RequestedDeliveryDate), customerPurchaseOrderDate: createdAt(row.CustomerPurchaseOrderDate), createdByUser: text(row.CreatedByUser) };
+}
+
+function toOrderLine(row: Record<string, unknown>): OrderDetail["items"][number] {
+  return { item: text(row.SalesOrderItem), material: text(row.Material), description: text(row.SalesOrderItemText), quantity: amount(row.RequestedQuantity), unit: text(row.RequestedQuantityUnit) || text(row.OrderQuantityUnit), netPrice: amount(row.NetPriceAmount), netAmount: amount(row.NetAmount), currency: text(row.TransactionCurrency), deliveryStatus: status(row.OverallDeliveryStatus) };
+}
 ```
 
 - [ ] **Step 4: Implement `list` and analytics with one SAP OData read**
