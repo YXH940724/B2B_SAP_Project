@@ -182,6 +182,11 @@ test("serves an order-center dashboard for SAP and portal order sources", () => 
   assert.match(script, /function renderOrderDashboard/);
 });
 
+test("keeps inactive portal views visually hidden", () => {
+  const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/view-visibility.css"), "utf8");
+  assert.match(styles, /\[hidden\]\{display:none!important\}/);
+});
+
 test("keeps storefront informational feedback separate from authentication error styling", () => {
   const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/styles.css"), "utf8");
   assert.match(styles, /#auth-message\{[^}]*color:#b42318/);
