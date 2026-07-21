@@ -8,19 +8,13 @@ type Results<T> = { results?: T[] };
 export type OrderDefaults = {
   paymentTerms?: string;
   incotermsClassification?: string;
-  incotermsVersion?: string;
   incotermsLocation?: string;
-  incotermsLocation1?: string;
-  incotermsLocation2?: string;
 };
 
 type CustomerSalesAreaDefaults = {
   CustomerPaymentTerms?: string;
   IncotermsClassification?: string;
-  IncotermsVersion?: string;
   IncotermsTransferLocation?: string;
-  IncotermsLocation1?: string;
-  IncotermsLocation2?: string;
 };
 
 function optional(value: string | undefined): string | undefined {
@@ -31,16 +25,13 @@ export async function getOrderDefaults(client: SapODataClient, config: SapConfig
   const customer = normalizeCustomer(customerInput);
   const response = await client.getAt<Results<CustomerSalesAreaDefaults>>(config.services.businessPartner, "/A_CustomerSalesArea", {
     "$filter": `Customer eq '${odataKey(customer)}' and SalesOrganization eq '${odataKey(salesArea.salesOrganization)}' and DistributionChannel eq '${odataKey(salesArea.distributionChannel)}' and Division eq '${odataKey(salesArea.division)}'`,
-    "$select": "CustomerPaymentTerms,IncotermsClassification,IncotermsVersion,IncotermsTransferLocation,IncotermsLocation1,IncotermsLocation2",
+    "$select": "CustomerPaymentTerms,IncotermsClassification,IncotermsTransferLocation",
     "$top": 1,
   });
   const row = response.data.results?.[0] ?? {};
   return {
     paymentTerms: optional(row.CustomerPaymentTerms),
     incotermsClassification: optional(row.IncotermsClassification),
-    incotermsVersion: optional(row.IncotermsVersion),
     incotermsLocation: optional(row.IncotermsTransferLocation),
-    incotermsLocation1: optional(row.IncotermsLocation1),
-    incotermsLocation2: optional(row.IncotermsLocation2),
   };
 }

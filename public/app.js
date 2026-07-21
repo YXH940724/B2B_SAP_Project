@@ -262,15 +262,17 @@ async function renderOrderEntry() {
   }
   const groups = groupCartBySalesArea();
   host.append(element("p", "empty-state", "正在读取 SAP 客户条款与物料履约主数据…"));
+  $("customer-payment-terms").value = "";
+  $("incoterms-classification").value = "";
+  $("incoterms-location").value = "";
   try {
     const defaults = await Promise.all(groups.map((group) => loadOrderDefaults(group)));
     const allItems = groups.flatMap((group) => group.items);
     await Promise.all(allItems.map((item) => loadFulfillmentOptions(item)));
     const first = defaults[0] || {};
-    if (!$("customer-payment-terms").value) $("customer-payment-terms").value = first.paymentTerms || "";
-    if (!$("incoterms-classification").value) $("incoterms-classification").value = first.incotermsClassification || "";
-    if (!$("incoterms-version").value) $("incoterms-version").value = first.incotermsVersion || "";
-    if (!$("incoterms-location").value) $("incoterms-location").value = first.incotermsLocation || "";
+    $("customer-payment-terms").value = first.paymentTerms || "";
+    $("incoterms-classification").value = first.incotermsClassification || "";
+    $("incoterms-location").value = first.incotermsLocation || "";
   } catch (error) {
     portalNote(`订单主数据读取失败：${error.message}`);
   }
@@ -510,7 +512,7 @@ function renderOrderDetail(data) {
   const fields = [
     ["创建日期", header.createdAt], ["销售组织", header.salesOrganization], ["分销渠道", header.distributionChannel], ["产品组", header.division],
     ["客户采购订单号", header.purchaseOrderByCustomer], ["期望交货日期", header.requestedDeliveryDate], ["付款条款", header.paymentTerms], ["贸易术语", header.incotermsClassification],
-    ["贸易术语版本", header.incotermsVersion], ["贸易地点", header.incotermsLocation], ["客户采购订单日期", header.customerPurchaseOrderDate], ["创建人", header.createdByUser],
+    ["贸易地点", header.incotermsLocation], ["客户采购订单日期", header.customerPurchaseOrderDate], ["创建人", header.createdByUser],
   ];
   const details = element("dl", "order-detail-fields");
   fields.forEach(([label, value]) => details.append(element("dt", "", label), element("dd", "", unmaintained(value))));
@@ -530,42 +532,54 @@ function renderOrderDetail(data) {
     lines.append(element("p", "empty-state", "SAP 未维护订单行项目。"));
     return;
   }
-  const table = document.createElement("table");
-  table.innerHTML = "<thead><tr><th>项目</th><th>物料 / 描述</th><th>客户料号</th><th>数量</th><th>工厂 / 库位</th><th>净价</th><th>税率 / 税额</th><th>净额</th><th>交货状态</th></tr></thead>";
-  const body = document.createElement("tbody");
+  const cards = element("div", "order-line-card-list");
   items.forEach((item) => {
-    const row = document.createElement("tr");
-    const material = element("td", "order-material-cell");
-    material.append(element("strong", "", unmaintained(item.material)), element("span", "", unmaintained(item.description)));
-    row.append(element("td", "", unmaintained(item.item)), material, element("td", "", unmaintained(item.customerMaterial)), element("td", "", `${unmaintained(item.quantity)} ${item.unit || "SAP 未维护"}`), element("td", "", [item.productionPlant, item.storageLocation].filter(Boolean).join(" / ") || "SAP 未维护"), element("td", "", formatMoney(item.currency, item.netPrice)));
-    row.append(element("td", "", item.taxRate === null || item.taxRate === undefined ? "SAP 定价后确认" : `${item.taxRate}% / ${formatMoney(item.currency, item.taxAmount)}`));
-    row.append(element("td", "", formatMoney(item.currency, item.netAmount)));
-    const delivery = element("td");
-    delivery.append(statusBadge(item.deliveryStatus));
-    row.append(delivery);
-    body.append(row);
+    const card = element("article", "order-line-card");
+    const heading = element("header", "order-line-card-heading");
+    const material = element("div", "order-line-card-material");
+    material.append(element("span", "order-line-number", `项目 ${unmaintained(item.item)}`), element("strong", "", unmaintained(item.material)), element("p", "", unmaintained(item.description)));
+    const total = element("p", "order-line-card-total", formatMoney(item.currency, item.netAmount));
+    heading.append(material, total);
+    const groups = element("div", "order-line-card-groups");
+    const commercial = element("section", "order-line-card-group");
+    commercial.append(element("h5", "", "数量与金额"), element("p", "", `${unmaintained(item.quantity)} ${item.unit || "SAP 未维护"}`), element("p", "", `净价 ${formatMoney(item.currency, item.netPrice)}`));
+    const tax = element("section", "order-line-card-group");
+    tax.append(element("h5", "", "税务"), element("p", "", item.taxRate === null || item.taxRate === undefined ? "SAP 定价后确认" : `税率 ${item.taxRate}%`), element("p", "", item.taxAmount === null || item.taxAmount === undefined ? "税额待确认" : `税额 ${formatMoney(item.currency, item.taxAmount)}`));
+    const fulfillment = element("section", "order-line-card-group");
+    fulfillment.append(element("h5", "", "履约"), element("p", "", [item.productionPlant, item.storageLocation].filter(Boolean).join(" / ") || "工厂 / 库位未维护"), statusBadge(item.deliveryStatus));
+    const customerReference = element("section", "order-line-card-group");
+    customerReference.append(element("h5", "", "客户料号"), element("p", "", unmaintained(item.customerMaterial)));
+    groups.append(commercial, tax, fulfillment, customerReference);
+    card.append(heading, groups);
+    cards.append(card);
   });
-  table.append(body);
-  lines.append(table);
+  lines.append(cards);
 }
 
 function renderPrintPreview(data) {
   const host = $("print-preview-content");
   host.replaceChildren();
   const header = data?.header || {};
-  host.append(element("p", "eyebrow", "SAP 客户订货商城"), element("h1", "", `销售订单 ${unmaintained(header.salesOrder).replace(/^0+/, "") || unmaintained(header.salesOrder)}`));
+  const brand = element("div", "print-brand", "HAND");
+  brand.append(element("span", "", "汉得"));
+  const documentHeader = element("header", "print-document-header");
+  documentHeader.append(element("p", "eyebrow", "销售订单 / SALES ORDER"), element("h1", "", `销售订单 ${unmaintained(header.salesOrder).replace(/^0+/, "") || unmaintained(header.salesOrder)}`), element("p", "", `订单日期：${unmaintained(header.createdAt)}`));
   const metadata = element("dl", "print-metadata");
-  [["客户采购订单号", header.purchaseOrderByCustomer], ["销售范围", salesAreaLabel(header)], ["付款条款", header.paymentTerms], ["贸易术语", [header.incotermsClassification, header.incotermsVersion, header.incotermsLocation].filter(Boolean).join(" / ")], ["期望交货", header.requestedDeliveryDate]].forEach(([label, value]) => metadata.append(element("dt", "", label), element("dd", "", unmaintained(value))));
+  [["客户采购订单号", header.purchaseOrderByCustomer], ["销售范围", salesAreaLabel(header)], ["付款条款", header.paymentTerms], ["贸易术语", [header.incotermsClassification, header.incotermsLocation].filter(Boolean).join(" / ")], ["期望交货", header.requestedDeliveryDate]].forEach(([label, value]) => metadata.append(element("dt", "", label), element("dd", "", unmaintained(value))));
   const table = document.createElement("table");
-  table.innerHTML = "<thead><tr><th>项目</th><th>物料</th><th>描述</th><th>数量</th><th>净额</th></tr></thead>";
+  table.innerHTML = "<thead><tr><th>项目</th><th>物料 / 描述</th><th>数量</th><th>工厂 / 库位</th><th>税务</th><th>净额</th></tr></thead>";
   const body = document.createElement("tbody");
   (data?.items || []).forEach((item) => {
     const row = document.createElement("tr");
-    [unmaintained(item.item), unmaintained(item.material), unmaintained(item.description), `${unmaintained(item.quantity)} ${item.unit || "—"}`, formatMoney(item.currency, item.netAmount)].forEach((value) => row.append(element("td", "", value)));
+    const material = element("td", "print-material");
+    material.append(element("strong", "", unmaintained(item.material)), element("span", "", unmaintained(item.description)));
+    [unmaintained(item.item), material, `${unmaintained(item.quantity)} ${item.unit || "—"}`, [item.productionPlant, item.storageLocation].filter(Boolean).join(" / ") || "—", item.taxRate === null || item.taxRate === undefined ? "待确认" : `${item.taxRate}% / ${formatMoney(item.currency, item.taxAmount)}`, formatMoney(item.currency, item.netAmount)].forEach((value) => row.append(value instanceof HTMLElement ? value : element("td", "", value)));
     body.append(row);
   });
   table.append(body);
-  host.append(metadata, table, element("p", "print-total", `订单金额：${formatMoney(header.currency, header.total)}`));
+  const totals = element("section", "print-totals");
+  totals.append(element("span", "", "订单净额"), element("strong", "", formatMoney(header.currency, header.total)));
+  host.append(brand, documentHeader, metadata, table, totals, element("footer", "print-document-footer", "感谢您选择汉得客户服务门户 · HAND Enterprise Solutions"));
 }
 
 function renderOrderWorkbench(data) {
@@ -648,7 +662,6 @@ function checkoutPayload() {
     note: $("portal-note").value,
     customerPaymentTerms: $("customer-payment-terms").value,
     incotermsClassification: $("incoterms-classification").value,
-    incotermsVersion: $("incoterms-version").value,
     incotermsLocation: $("incoterms-location").value,
   };
 }

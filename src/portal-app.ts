@@ -160,15 +160,14 @@ function orderHistoryQuery(req: express.Request): Partial<OrderQuery> {
   };
 }
 
-function checkoutFields(body: unknown): { requested_delivery_date?: string; purchase_order_by_customer?: string; portal_note?: string; customer_payment_terms?: string; incoterms_classification?: string; incoterms_version?: string; incoterms_location?: string } {
-  const source = body as { requestedDeliveryDate?: unknown; purchaseOrderByCustomer?: unknown; note?: unknown; customerPaymentTerms?: unknown; incotermsClassification?: unknown; incotermsVersion?: unknown; incotermsLocation?: unknown } | undefined;
+function checkoutFields(body: unknown): { requested_delivery_date?: string; purchase_order_by_customer?: string; portal_note?: string; customer_payment_terms?: string; incoterms_classification?: string; incoterms_location?: string } {
+  const source = body as { requestedDeliveryDate?: unknown; purchaseOrderByCustomer?: unknown; note?: unknown; customerPaymentTerms?: unknown; incotermsClassification?: unknown; incotermsLocation?: unknown } | undefined;
   const parsed = PortalCheckoutSchema.safeParse({
     requested_delivery_date: optionalText(source?.requestedDeliveryDate),
     purchase_order_by_customer: optionalText(source?.purchaseOrderByCustomer),
     portal_note: optionalText(source?.note),
     customer_payment_terms: optionalText(source?.customerPaymentTerms),
     incoterms_classification: optionalText(source?.incotermsClassification),
-    incoterms_version: optionalText(source?.incotermsVersion),
     incoterms_location: optionalText(source?.incotermsLocation),
   });
   if (parsed.success) return parsed.data;

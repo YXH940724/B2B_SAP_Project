@@ -45,16 +45,16 @@ test("maps purchase reference and requested delivery date into the SAP payload",
   assert.equal(payload.RequestedDeliveryDate, "2026-08-01T00:00:00");
 });
 
-test("maps order terms and fulfillment data into SAP sales-order fields", () => {
+test("maps order terms and fulfillment data without an Incoterms version", () => {
   const payload = createPayload({
     sales_order_type: "OR", sales_organization: "1310", distribution_channel: "10", organization_division: "00", sold_to_party: "100001",
-    customer_payment_terms: "0001", incoterms_classification: "FOB", incoterms_version: "2020", incoterms_location: "Shanghai",
+    customer_payment_terms: "0001", incoterms_classification: "FOB", incoterms_location: "Shanghai",
     items: [{ material: "MAT-01", requested_quantity: 2, requested_quantity_unit: "EA", customer_material: "CUST-MAT-01", production_plant: "1310", storage_location: "0001" }],
     dry_run: true, response_format: "json",
   });
   assert.equal(payload.CustomerPaymentTerms, "0001");
   assert.equal(payload.IncotermsClassification, "FOB");
-  assert.equal(payload.IncotermsVersion, "2020");
+  assert.equal("IncotermsVersion" in payload, false);
   assert.equal(payload.IncotermsTransferLocation, "Shanghai");
   assert.deepEqual(payload.to_Item, { results: [{ Material: "MAT-01", RequestedQuantity: "2", RequestedQuantityUnit: "EA", MaterialByCustomer: "CUST-MAT-01", ProductionPlant: "1310", StorageLocation: "0001" }] });
 });

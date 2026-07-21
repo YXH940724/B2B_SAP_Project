@@ -42,7 +42,7 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
     orderDefaults: { get: async (customer, area) => {
       assert.equal(customer, "0000100001");
       assert.equal(area.key, "1000/10/00");
-      return { paymentTerms: "0001", incotermsClassification: "FOB", incotermsVersion: "2020", incotermsLocation: "上海" };
+      return { paymentTerms: "0001", incotermsClassification: "FOB", incotermsLocation: "上海" };
     } },
     fulfillment: { get: async (product) => ({
       product,
@@ -187,7 +187,7 @@ test("uses the requested language for the current session customer's catalog", a
 test("returns order defaults and fulfillment options only within the signed-in session", async () => {
   const agent = await registeredAgent(makeStorefrontApp);
   const defaults = await agent.get("/api/order-defaults?salesOrganization=1000&distributionChannel=10&division=00").expect(200);
-  assert.deepEqual(defaults.body, { paymentTerms: "0001", incotermsClassification: "FOB", incotermsVersion: "2020", incotermsLocation: "上海" });
+  assert.deepEqual(defaults.body, { paymentTerms: "0001", incotermsClassification: "FOB", incotermsLocation: "上海" });
   const fulfillment = await agent.get("/api/products/000000000000001386/fulfillment").expect(200);
   assert.deepEqual(fulfillment.body, {
     product: "000000000000001386",
@@ -291,9 +291,10 @@ test("serves the rich SAP order workbench controls", () => {
 test("serves localized catalog controls, structured fulfillment fields, and a printable order detail", () => {
   const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
-  for (const id of ["catalog-language", "customer-payment-terms", "incoterms-classification", "incoterms-version", "incoterms-location", "print-order-detail", "print-preview"]) {
+  for (const id of ["catalog-language", "customer-payment-terms", "incoterms-classification", "incoterms-location", "print-order-detail", "print-preview"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  assert.doesNotMatch(html, /id="incoterms-version"/);
   for (const name of ["function loadOrderDefaults", "function loadFulfillmentOptions", "function renderPrintPreview", "window.print()"])
     assert.match(script, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });

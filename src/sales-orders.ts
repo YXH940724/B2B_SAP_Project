@@ -20,7 +20,6 @@ export const PortalCheckoutSchema = z.object({
   portal_note: z.string().trim().max(500).optional(),
   customer_payment_terms: z.string().trim().min(1).max(4).optional(),
   incoterms_classification: z.string().trim().min(1).max(3).optional(),
-  incoterms_version: z.string().trim().min(1).max(4).optional(),
   incoterms_location: z.string().trim().min(1).max(70).optional(),
 }).strict();
 
@@ -67,7 +66,6 @@ export function createPayload(input: CreateSalesOrderInput): Record<string, unkn
     ...(input.requested_delivery_date ? { RequestedDeliveryDate: `${input.requested_delivery_date}T00:00:00` } : {}),
     ...(input.customer_payment_terms ? { CustomerPaymentTerms: input.customer_payment_terms } : {}),
     ...(input.incoterms_classification ? { IncotermsClassification: input.incoterms_classification } : {}),
-    ...(input.incoterms_version ? { IncotermsVersion: input.incoterms_version } : {}),
     ...(input.incoterms_location ? { IncotermsTransferLocation: input.incoterms_location } : {}),
     to_Item: { results: input.items.map((item) => ({
       Material: item.material,
