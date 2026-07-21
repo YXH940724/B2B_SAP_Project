@@ -98,11 +98,16 @@ function makeClient() {
           },
         };
       }
+      if (path === "/A_ProductDescription") {
+        const filter = String(params?.["$filter"] ?? "");
+        if (filter.includes("000000000000001386")) return { data: { results: [{ ProductDescription: "演示物料" }] } };
+        return { data: { results: [] } };
+      }
       if (path === "/A_Product('000000000000001386')") {
-        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC" } };
       }
       if (path === "/A_Product('000000000000001387')") {
-        return { data: { Product: "000000000000001387", BaseUnit: "EA", to_Description: { results: [] } } };
+        return { data: { Product: "000000000000001387", BaseUnit: "EA" } };
       }
       throw new Error(`Unexpected OData request: ${path}`);
     },
@@ -171,8 +176,9 @@ test("loads A305 condition records before looking up their scoped price validiti
       if (path === "/A_SlsPrcgCndnRecdValidity") {
         return { data: { results: [{ Material: "000000000000001386", Customer: "0000100001", SalesOrganization: "1310", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
       }
+      if (path === "/A_ProductDescription") return { data: { results: [{ ProductDescription: "演示物料" }] } };
       if (path === "/A_Product('000000000000001386')") {
-        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+        return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC" } };
       }
       throw new Error(`Unexpected request ${path}`);
     },
@@ -212,7 +218,8 @@ test("accepts SAP price-validity customer numbers returned without leading zeroe
     getAt: async (_service: string, path: string) => {
       if (path === "/A_SlsPrcgConditionRecord") return { data: { results: [{ ConditionRecord: "0000000123", ConditionTable: "305", ConditionRateValue: "30.00", ConditionRateValueUnit: "CNY", ConditionQuantityUnit: "PC", ConditionIsDeleted: false }] } };
       if (path === "/A_SlsPrcgCndnRecdValidity") return { data: { results: [{ Material: "000000000000001386", Customer: "100001", SalesOrganization: "1310", DistributionChannel: "10", ConditionRecord: "0000000123", ConditionValidityStartDate: "/Date(1782777600000)/", ConditionValidityEndDate: "/Date(1790812800000)/" }] } };
-      if (path === "/A_Product('000000000000001386')") return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC", to_Description: { results: [{ ProductDescription: "演示物料" }] } } };
+      if (path === "/A_ProductDescription") return { data: { results: [{ ProductDescription: "演示物料" }] } };
+      if (path === "/A_Product('000000000000001386')") return { data: { Product: "000000000000001386", ProductGroup: "FG", BaseUnit: "PC" } };
       throw new Error(`Unexpected request ${path}`);
     },
   };
