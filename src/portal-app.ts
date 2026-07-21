@@ -63,12 +63,58 @@ function catalogQuery(req: express.Request): CatalogQuery {
   };
 }
 
-function salesAreaInput(source: Record<string, unknown>): Omit<SalesArea, "key"> {
+type SalesAreaSource = { salesOrganization?: unknown; distributionChannel?: unknown; division?: unknown };
+
+function salesAreaInput(source: SalesAreaSource): Omit<SalesArea, "key"> {
   const salesOrganization = typeof source.salesOrganization === "string" ? source.salesOrganization.trim() : "";
   const distributionChannel = typeof source.distributionChannel === "string" ? source.distributionChannel.trim() : "";
   const division = typeof source.division === "string" ? source.division.trim() : "";
   if (!salesOrganization || !distributionChannel || !division) throw new Error("请选择有效的销售范围。");
   return { salesOrganization, distributionChannel, division };
+}
+
+export type PortalCartLine = {
+  product: string;
+  quantity: number;
+  plant?: string;
+  salesOrganization: string;
+  distributionChannel: string;
+  division: string;
+};
+
+export type PortalCartGroup = { salesArea: SalesArea; items: PortalCartLine[] };
+
+export function groupPortalCartLines(lines: PortalCartLine[]): PortalCartGroup[] {
+  const groups = new Map<string, PortalCartGroup>();
+  lines.forEach((line) => {
+    const area = salesAreaInput(line);
+    const salesArea: SalesArea = { ...area, key: `${area.salesOrganization}/${area.distributionChannel}/${area.division}` };
+    const group = groups.get(salesArea.key) ?? { salesArea, items: [] };
+    group.items.push(line);
+    groups.set(salesArea.key, group);
+  });
+  return [...groups.values()];
+}
+
+function cartLines(body: unknown): PortalCartLine[] {
+  const source = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+  const items = source.items;
+  if (!Array.isArray(items) || !items.length || items.length > 100) throw new Error("请提供 1 至 100 行订单项目。");
+  return items.map((item) => {
+    const line = typeof item === "object" && item !== null ? item as Record<string, unknown> : {};
+    const product = typeof line.product === "string" ? line.product.trim() : "";
+    const quantity = Number(line.quantity);
+    if (!product) throw new Error("物料不能为空。");
+    if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("物料数量必须大于零。");
+    return {
+      product,
+      quantity,
+      plant: typeof line.plant === "string" && line.plant.trim() ? line.plant.trim() : undefined,
+      salesOrganization: String(line.salesOrganization ?? source.salesOrganization ?? "").trim(),
+      distributionChannel: String(line.distributionChannel ?? source.distributionChannel ?? "").trim(),
+      division: String(line.division ?? source.division ?? "").trim(),
+    };
+  });
 }
 
 function optionalText(input: unknown): string | undefined {
@@ -92,6 +138,8 @@ function orderHistoryQuery(req: express.Request): Partial<OrderQuery> {
     from: stringQuery(req.query.from),
     to: stringQuery(req.query.to),
     salesOrganization: stringQuery(req.query.salesOrganization),
+    distributionChannel: stringQuery(req.query.distributionChannel),
+    division: stringQuery(req.query.division),
     overallStatus: stringQuery(req.query.overallStatus),
     deliveryStatus: stringQuery(req.query.deliveryStatus),
     query: stringQuery(req.query.query),
@@ -156,13 +204,35 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     return deps.orderHistory;
   }
 
-  async function selectedSalesArea(customer: string, source: Record<string, unknown>): Promise<SalesArea> {
+  async function selectedSalesArea(customer: string, source: SalesAreaSource): Promise<SalesArea> {
     const requested = salesAreaInput(source);
     const areas = await salesAreaDependencies().list(customer);
     const area = areas.find((candidate) => candidate.salesOrganization === requested.salesOrganization
       && candidate.distributionChannel === requested.distributionChannel && candidate.division === requested.division);
     if (!area) throw new Error("所选销售范围不属于当前客户。");
     return area;
+  }
+
+  async function selectedCartGroups(customer: string, body: unknown): Promise<PortalCartGroup[]> {
+    return Promise.all(groupPortalCartLines(cartLines(body)).map(async (group) => ({
+      ...group,
+      salesArea: await selectedSalesArea(customer, group.salesArea),
+    })));
+  }
+
+  async function priceOrderGroup(customer: string, group: PortalCartGroup): Promise<{
+    salesArea: SalesArea;
+    items: Array<{ productId: string; quantity: number; unitPrice: string; currency: string; priceUnit: string; lineTotal: number }>;
+    totalsByCurrency: Array<{ currency: string; total: number }>;
+  }> {
+    const { client, config } = orderDependencies();
+    const items = await Promise.all(group.items.map(async (item) => {
+      const offer = await getSellableOffer(client, config, customer, group.salesArea, item.product);
+      return { productId: item.product, quantity: item.quantity, unitPrice: offer.unitPrice, currency: offer.currency, priceUnit: offer.priceUnit, lineTotal: Number(offer.unitPrice) * item.quantity };
+    }));
+    const totals = new Map<string, number>();
+    items.forEach((item) => totals.set(item.currency, (totals.get(item.currency) ?? 0) + item.lineTotal));
+    return { salesArea: group.salesArea, items, totalsByCurrency: [...totals.entries()].map(([currency, total]) => ({ currency, total })) };
   }
 
   function respondRouteError(res: express.Response, error: unknown): void {
@@ -258,36 +328,47 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     try {
       const active = session(req);
       const checkout = checkoutFields(req.body);
-      const salesArea = await selectedSalesArea(active.customer, req.body ?? {});
-      const { client, config } = orderDependencies();
-      const items = Array.isArray(req.body?.items) ? req.body.items : [];
-      if (!items.length || items.length > 100) throw new Error("请提供 1 至 100 行订单项目。");
-      const priced = await Promise.all(items.map(async (item: { product: string; quantity: number }) => {
-        const quantity = Number(item.quantity);
-        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("物料数量必须大于零。");
-        const offer = await getSellableOffer(client, config, active.customer, salesArea, String(item.product));
-        return { ...offer, productId: String(item.product), quantity, lineTotal: Number(offer.unitPrice) * quantity };
-      }));
-      res.json({ items: priced, total: priced.reduce((sum, item) => sum + item.lineTotal, 0), checkout });
+      const groups = await Promise.all((await selectedCartGroups(active.customer, req.body)).map((group) => priceOrderGroup(active.customer, group)));
+      res.json({ groups, checkout });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }
   });
 
   app.post("/api/orders/submit", async (req, res) => {
     try {
       const { customer } = session(req);
-      const salesArea = await selectedSalesArea(customer, req.body ?? {});
       const checkout = checkoutFields(req.body);
       const { client, config } = orderDependencies();
       if (req.body?.confirm !== true) throw new Error("请确认订单后再同步 SAP。");
-      const preview = await Promise.all((req.body?.items ?? []).map(async (item: { product: string; quantity: number; plant?: string }) => {
-        const offer = await getSellableOffer(client, config, customer, salesArea, item.product);
-        return { material: item.product, requested_quantity: Number(item.quantity), requested_quantity_unit: offer.priceUnit || "PC", plant: item.plant };
-      }));
-      if (!preview.length) throw new Error("订单没有项目。");
       assertWriteAllowed(config, "CREATE_SALES_ORDER", "CREATE_SALES_ORDER");
-      const payload = createPayload({ sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR", sales_organization: salesArea.salesOrganization, distribution_channel: salesArea.distributionChannel, organization_division: salesArea.division, sold_to_party: customer, ...checkout, items: preview, dry_run: false, confirm: "CREATE_SALES_ORDER", response_format: "json" });
-      const created = await client.write<unknown>("post", "/A_SalesOrder", payload);
-      res.json({ success: true, salesOrder: created.data });
+      const results = await Promise.all((await selectedCartGroups(customer, req.body)).map(async (group) => {
+        try {
+          const preview = await priceOrderGroup(customer, group);
+          const payload = createPayload({
+            sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR",
+            sales_organization: group.salesArea.salesOrganization,
+            distribution_channel: group.salesArea.distributionChannel,
+            organization_division: group.salesArea.division,
+            sold_to_party: customer,
+            ...checkout,
+            items: preview.items.map((item) => {
+              const cartLine = group.items.find((line) => line.product === item.productId);
+              return { material: item.productId, requested_quantity: item.quantity, requested_quantity_unit: item.priceUnit || "PC", plant: cartLine?.plant };
+            }),
+            dry_run: false,
+            confirm: "CREATE_SALES_ORDER",
+            response_format: "json",
+          });
+          const created = await client.write<unknown>("post", "/A_SalesOrder", payload);
+          return { salesArea: group.salesArea, success: true, salesOrder: created.data };
+        } catch (error) {
+          return { salesArea: group.salesArea, success: false, error: error instanceof Error ? error.message : "请求失败。" };
+        }
+      }));
+      if (!results.some((result) => result.success)) {
+        res.status(400).json({ success: false, groups: results });
+        return;
+      }
+      res.json({ success: true, groups: results });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }
   });
 

@@ -6,7 +6,7 @@ import request from "supertest";
 import { AuthService } from "../src/auth-service.js";
 import { createAuthStore } from "../src/auth-store.js";
 import { OrderHistoryError } from "../src/order-history.js";
-import { createPortalApp } from "../src/portal-app.js";
+import { createPortalApp, groupPortalCartLines } from "../src/portal-app.js";
 
 function makeApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string } {
   let code = "";
@@ -19,8 +19,9 @@ function makeApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => st
   return { app, getCode: () => code };
 }
 
-function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string } {
+function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string; getOrderQuery: () => Record<string, unknown> | undefined } {
   let code = "";
+  let latestOrderQuery: Record<string, unknown> | undefined;
   const auth = new AuthService(createAuthStore(":memory:"), () => 1_700_000_000_000, () => "123456");
   const app = createPortalApp({
     auth,
@@ -37,7 +38,9 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
     } },
     customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
     orderHistory: {
-      list: async (customer: string, query) => ({
+      list: async (customer: string, query) => {
+        latestOrderQuery = query;
+        return ({
         items: [{
           salesOrder: "0000001372", salesOrderType: "OR", createdAt: "2026-07-01", salesOrganization: query?.salesOrganization ?? "1310",
           distributionChannel: "10", division: "00", purchaseOrderByCustomer: "PO-1", total: 100, currency: "CNY",
@@ -55,7 +58,8 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
           totalAmount: 100, averageAmount: 100, currency: "CNY", inFulfillmentCount: 0, months: [], statuses: [],
         },
         insights: { topSalesOrganizations: [], largestOrder: null, latestOrderDate: "2026-07-01", attentionCount: 1 },
-      }),
+        });
+      },
       detail: async (customer: string, salesOrder: string) => {
         assert.equal(customer, "0000100001");
         if (salesOrder === "0000009999") throw new OrderHistoryError("ORDER_NOT_FOUND", 404, "订单不存在。");
@@ -71,7 +75,7 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
       },
     },
   });
-  return { app, getCode: () => code };
+  return { app, getCode: () => code, getOrderQuery: () => latestOrderQuery };
 }
 
 async function registeredAgent(factory: () => { app: ReturnType<typeof createPortalApp>; getCode: () => string }) {
@@ -89,6 +93,19 @@ test("does not create a cookie when a portal login password is incorrect", async
   assert.equal(response.status, 401);
   assert.match(response.body.error, /客户号或密码/);
   assert.equal(response.headers["set-cookie"], undefined);
+});
+
+test("groups cart lines by the complete sales area without clearing the cart", () => {
+  const groups = groupPortalCartLines([
+    { product: "1386", quantity: 2, salesOrganization: "1310", distributionChannel: "10", division: "00" },
+    { product: "1387", quantity: 1, salesOrganization: "2000", distributionChannel: "20", division: "00" },
+    { product: "1388", quantity: 3, salesOrganization: "1310", distributionChannel: "10", division: "00" },
+  ]);
+
+  assert.deepEqual(groups.map((group) => ({ key: group.salesArea.key, products: group.items.map((item) => item.product) })), [
+    { key: "1310/10/00", products: ["1386", "1388"] },
+    { key: "2000/20/00", products: ["1387"] },
+  ]);
 });
 
 test("registers with a code then creates a secure session on login", async () => {
@@ -164,14 +181,19 @@ test("rejects an invalid checkout delivery date before SAP pricing", async () =>
 });
 
 test("uses only the cookie session customer for filtered order history", async () => {
-  const agent = await registeredAgent(makeStorefrontApp);
-  const response = await agent.get("/api/orders/history?page=1&pageSize=10&salesOrganization=1310&customer=0000000002").expect(200);
+  const storefront = makeStorefrontApp();
+  const agent = await registeredAgent(() => storefront);
+  const response = await agent.get("/api/orders/history?page=1&pageSize=10&salesOrganization=1310&distributionChannel=10&division=00&customer=0000000002").expect(200);
   assert.equal(response.body.items[0].salesOrder, "0000001372");
   assert.equal(response.body.total, 1);
   assert.equal(response.body.page, 1);
   assert.equal(response.body.pageSize, 10);
   assert.equal(response.body.dashboard.totalAmount, 100);
   assert.deepEqual(response.body.dashboard.totalsByCurrency, [{ currency: "CNY", orderCount: 1, totalAmount: 100, averageAmount: 100 }]);
+  const orderQuery = storefront.getOrderQuery();
+  assert.equal(orderQuery?.salesOrganization, "1310");
+  assert.equal(orderQuery?.distributionChannel, "10");
+  assert.equal(orderQuery?.division, "00");
   await request(makeStorefrontApp().app).get("/api/orders/history").expect(401);
 });
 
@@ -206,7 +228,10 @@ test("serves independent order-entry and customer-360 views", () => {
   assert.match(html, /id="customer-business-illustration"/);
   assert.match(html, /id="order-header-form"/);
   assert.match(html, /id="order-line-items"/);
+  assert.match(html, /id="order-entry-groups"/);
   assert.match(script, /function showView/);
+  assert.match(script, /function groupCartBySalesArea/);
+  assert.match(script, /function salesAreaLabel/);
   assert.match(script, /api\/customer-360/);
 });
 
@@ -226,6 +251,7 @@ test("serves the rich SAP order workbench controls", () => {
   for (const id of ["order-filter-form", "order-list", "order-pagination", "order-insights", "order-detail-dialog", "order-detail-lines"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  assert.match(html, /id="order-sales-area"/);
 });
 
 test("serves filter, pagination and detail renderers for the order workbench", () => {

@@ -188,7 +188,7 @@ test("loads A305 condition records before looking up their scoped price validiti
   assert.deepEqual(page.items.map((item) => item.product), ["000000000000001386"]);
 });
 
-test("temporarily scopes A305 catalog pricing to sales organization 1310 and PR00", async () => {
+test("scopes A305 catalog pricing to the selected customer sales organization and PR00", async () => {
   const calls: Array<{ path: string; params?: Record<string, string | number | undefined> }> = [];
   const client = {
     getAt: async (_service: string, path: string, params?: Record<string, string | number | undefined>) => {
@@ -204,7 +204,7 @@ test("temporarily scopes A305 catalog pricing to sales organization 1310 and PR0
 
   assert.match(String(calls[0]?.params?.["$filter"]), /ConditionType eq 'PR00'/);
   assert.match(String(calls[1]?.params?.["$filter"]), /ConditionType eq 'PR00'/);
-  assert.match(String(calls[1]?.params?.["$filter"]), /SalesOrganization eq '1310'/);
+  assert.match(String(calls[1]?.params?.["$filter"]), /SalesOrganization eq '9999'/);
 });
 
 test("accepts SAP price-validity customer numbers returned without leading zeroes", async () => {
