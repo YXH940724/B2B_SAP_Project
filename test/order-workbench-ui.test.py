@@ -88,8 +88,8 @@ DETAIL_1372 = {
         "billingStatus": status("A", "已完成", "success"),
     },
     "items": [
-        {"item": "000010", "material": "MOCK-MAT-01", "description": "模拟物料一", "quantity": 2, "unit": "EA", "netPrice": 300, "netAmount": 600, "currency": "CNY", "deliveryStatus": status("A", "已完成", "success")},
-        {"item": "000020", "material": "MOCK-MAT-02", "description": "模拟物料二", "quantity": 1, "unit": "EA", "netPrice": 600, "netAmount": 600, "currency": "CNY", "deliveryStatus": status("B", "处理中", "warning")},
+        {"item": "000010", "material": "MOCK-MAT-01", "description": "模拟物料一", "customerMaterial": "CUST-01", "quantity": 2, "unit": "EA", "productionPlant": "1310", "storageLocation": "0001", "netPrice": 300, "netAmount": 600, "taxRate": 13, "taxAmount": 78, "currency": "CNY", "deliveryStatus": status("A", "已完成", "success")},
+        {"item": "000020", "material": "MOCK-MAT-02", "description": "模拟物料二", "customerMaterial": "CUST-02", "quantity": 1, "unit": "EA", "productionPlant": "1310", "storageLocation": "0002", "netPrice": 600, "netAmount": 600, "taxRate": 13, "taxAmount": 78, "currency": "CNY", "deliveryStatus": status("B", "处理中", "warning")},
     ],
 }
 
@@ -155,8 +155,8 @@ def run() -> None:
             expect(page.locator("#order-entry-groups thead")).to_contain_text("工厂")
             expect(page.locator("#order-entry-groups thead")).to_contain_text("税务预览")
             expect(page.locator("#order-entry-groups select").first).to_have_value("1310")
-            page.get_by_role("button", name="返回购物车").click()
             page.locator("#customer-payment-terms").fill("9999")
+            page.get_by_role("button", name="返回购物车").click()
             page.get_by_role("button", name="去结算").click()
             expect(page.locator("#customer-payment-terms")).to_have_value("0001")
             page.get_by_role("button", name="返回购物车").click()
@@ -197,11 +197,15 @@ def run() -> None:
             expect(page.locator("#order-list tbody tr")).to_have_count(2)
             page.get_by_role("button", name="查看明细").first.click()
             page.locator("#order-detail-dialog").wait_for(state="visible")
-            expect(page.locator("#order-detail-lines tbody tr")).to_have_count(2)
+            expect(page.locator("#order-detail-lines .order-line-card")).to_have_count(2)
+            expect(page.locator("#order-detail-lines .order-line-card").first).to_contain_text("税务")
+            expect(page.locator("#order-detail-lines .order-line-card").first).to_contain_text("1310 / 0001")
             assert "模拟物料一" in page.locator("#order-detail-dialog").inner_text()
             page.get_by_role("button", name="打印 / 预览").click()
             page.locator("#print-preview").wait_for(state="visible")
             expect(page.locator("#print-preview-content")).to_contain_text("模拟物料一")
+            expect(page.locator("#print-preview-content .print-brand")).to_contain_text("HAND")
+            expect(page.locator("#print-preview-content .print-document-footer")).to_contain_text("汉得")
             page.get_by_role("button", name="关闭").last.click()
             page.screenshot(path=str(SCREENSHOT_PATH), full_page=True)
 
