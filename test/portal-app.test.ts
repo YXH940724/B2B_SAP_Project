@@ -221,6 +221,13 @@ test("serves an SAP-only order center", () => {
   assert.match(script, /function renderOrderDashboard/);
 });
 
+test("serves the rich SAP order workbench controls", () => {
+  const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  for (const id of ["order-filter-form", "order-list", "order-pagination", "order-insights", "order-detail-dialog", "order-detail-lines"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+});
+
 test("keeps inactive portal views visually hidden", () => {
   const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/view-visibility.css"), "utf8");
   assert.match(styles, /\[hidden\]\{display:none!important\}/);

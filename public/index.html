@@ -97,9 +97,24 @@
       </section>
 
       <section id="view-orders" class="checkout-panel orders-view" hidden>
-        <div><p class="eyebrow">订单中心</p><h2>近 12 个月订单分析</h2><p>订单数据直接从 SAP 销售订单读取，仅展示当前登录客户的订单。</p></div>
-        <div id="order-dashboard-summary" class="dashboard-summary" aria-live="polite"></div>
-        <section class="order-source"><h3>SAP 销售订单</h3><div id="sap-orders-list"></div></section>
+        <header class="orders-heading"><p class="eyebrow">订单中心</p><h2>近 12 个月订单分析</h2><p>订单数据直接从 SAP 销售订单读取，仅展示当前登录客户的订单。</p></header>
+        <form id="order-filter-form" class="order-filters" aria-label="订单筛选">
+          <label>关键词<input id="order-query" type="search" placeholder="订单号或客户采购订单号" autocomplete="off"></label>
+          <label>创建日期从<input id="order-from" type="date"></label>
+          <label>创建日期至<input id="order-to" type="date"></label>
+          <label>销售组织<select id="order-sales-organization"><option value="">全部销售组织</option></select></label>
+          <label>整体状态<select id="order-overall-status"><option value="">全部整体状态</option></select></label>
+          <label>交货状态<select id="order-delivery-status"><option value="">全部交货状态</option></select></label>
+          <label>排序<select id="order-sort"><option value="createdAt:desc">最新创建</option><option value="total:desc">金额从高到低</option></select></label>
+          <button type="submit">查询</button>
+        </form>
+        <section id="order-analytics" class="order-analytics" aria-label="订单分析">
+          <div id="order-dashboard-summary" class="dashboard-summary" aria-live="polite"></div>
+          <section id="order-trend" class="order-trend" aria-label="订单趋势"><h3>订单趋势</h3><p>按创建月份查看订单数量与金额走势。</p></section>
+        </section>
+        <section id="order-insights" class="order-insights" aria-label="订单洞察" aria-live="polite"></section>
+        <section id="order-list" class="order-list" aria-label="SAP 销售订单" aria-live="polite"><h3>SAP 销售订单</h3><div id="sap-orders-list"></div></section>
+        <nav id="order-pagination" class="pagination" aria-label="订单分页"></nav>
       </section>
     </section>
   </main>
@@ -108,6 +123,11 @@
     <h2 id="order-confirmation-title">确认同步至 SAP</h2>
     <div id="order-confirmation-summary"></div>
     <div class="dialog-actions"><button id="cancel-order-button" type="button" class="text-button">返回修改</button><button id="confirm-order-button" type="button">确认并同步至 SAP</button></div>
+  </dialog>
+  <dialog id="order-detail-dialog" class="order-detail-dialog" aria-labelledby="order-detail-title">
+    <div class="order-detail-dialog-header"><h2 id="order-detail-title">SAP 销售订单明细</h2><button id="close-order-detail" type="button" class="text-button" aria-label="关闭订单明细">关闭</button></div>
+    <div id="order-detail-header"></div>
+    <div id="order-detail-lines" aria-label="订单行项目"></div>
   </dialog>
   <script src="/app.js"></script>
 </body>
