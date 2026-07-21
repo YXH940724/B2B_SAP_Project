@@ -20,18 +20,28 @@ def status(code: str, label: str, tone: str = "neutral") -> dict:
 ORDER_1372 = {
     "salesOrder": "0000001372",
     "createdAt": "2026-07-01",
+    "salesOrderType": "OR",
     "salesOrganization": "1310",
+    "distributionChannel": "10",
+    "division": "00",
+    "purchaseOrderByCustomer": "MOCK-PO-1372",
     "overallStatus": status("A", "已完成", "success"),
     "deliveryStatus": status("A", "已完成", "success"),
+    "billingStatus": status("A", "已开票", "success"),
     "currency": "CNY",
     "total": 1200,
 }
 ORDER_1373 = {
     "salesOrder": "0000001373",
     "createdAt": "2026-07-02",
+    "salesOrderType": "OR",
     "salesOrganization": "1310",
+    "distributionChannel": "10",
+    "division": "00",
+    "purchaseOrderByCustomer": "MOCK-PO-1373",
     "overallStatus": status("B", "处理中", "warning"),
     "deliveryStatus": status("B", "处理中", "warning"),
+    "billingStatus": status("B", "待开票", "warning"),
     "currency": "CNY",
     "total": 800,
 }
@@ -46,10 +56,16 @@ def history_payload(items: list[dict], page: int, total: int, page_count: int) -
         "pageCount": page_count,
         "dashboard": {
             "orderCount": total,
-            "totalsByCurrency": [{"currency": "CNY", "orderCount": total, "totalAmount": 2000, "averageAmount": 1000}],
+            "totalsByCurrency": [
+                {"currency": "CNY", "orderCount": total, "totalAmount": 2000, "averageAmount": 1000},
+                {"currency": "USD", "orderCount": 2, "totalAmount": 100, "averageAmount": 50},
+            ],
             "inFulfillmentCount": 1,
             "months": [{"month": "2026-07", "orderCount": total, "totalsByCurrency": [{"currency": "CNY", "orderCount": total, "totalAmount": 2000, "averageAmount": 1000}]}],
-            "statuses": [status("A", "已完成", "success"), status("B", "处理中", "warning")],
+            "statuses": [
+                {"status": status("A", "已完成", "success"), "count": 1},
+                {"status": status("B", "处理中", "warning"), "count": 1},
+            ],
         },
         "insights": {
             "topSalesOrganizations": [{"salesOrganization": "1310", "orderCount": total, "totalsByCurrency": [{"currency": "CNY", "orderCount": total, "totalAmount": 2000, "averageAmount": 1000}]}],
@@ -101,6 +117,8 @@ def run() -> None:
             observed_history_urls.append(route.request.url)
             if query.get("query") == ["没有匹配"]:
                 fulfill_json(route, history_payload([], 1, 0, 0))
+            elif query.get("overallStatus") == ["B"]:
+                fulfill_json(route, history_payload([ORDER_1373], 1, 1, 1))
             elif query.get("page") == ["2"]:
                 fulfill_json(route, history_payload([ORDER_1373], 2, 3, 2))
             else:
@@ -126,7 +144,30 @@ def run() -> None:
             page.get_by_role("link", name="订单中心").click()
             page.locator("#order-list tbody tr").first.wait_for(state="visible")
             assert page.locator("#order-list tbody tr").count() == 2
+            expect(page.locator("#order-dashboard-summary")).to_contain_text("平均订单额")
+            expect(page.locator("#order-dashboard-summary")).to_contain_text("CNY 1000.00")
+            expect(page.locator("#order-dashboard-summary")).to_contain_text("USD 50.00")
+            expect(page.locator("#order-status-distribution")).to_contain_text("状态分布")
+            expect(page.locator("#order-status-distribution")).to_contain_text("已完成：1 单")
+            expect(page.locator("#order-list thead")).to_contain_text("订单类型")
+            expect(page.locator("#order-list thead")).to_contain_text("客户采购订单号")
+            expect(page.locator("#order-list thead")).to_contain_text("销售范围")
+            expect(page.locator("#order-list thead")).to_contain_text("交货状态")
+            expect(page.locator("#order-list thead")).to_contain_text("开票状态")
+            expect(page.locator("#order-list tbody tr").first).to_contain_text("OR")
+            expect(page.locator("#order-list tbody tr").first).to_contain_text("MOCK-PO-1372")
+            expect(page.locator("#order-list tbody tr").first).to_contain_text("1310 / 10 / 00")
             assert "/api/orders/history?page=1" in observed_history_urls[0]
+
+            page.locator("#order-overall-status").select_option("B")
+            page.locator("#order-filter-form").get_by_role("button", name="查询").click()
+            expect(page.locator("#order-list tbody tr")).to_have_count(1)
+            expect(page.locator("#order-list tbody tr").first).to_contain_text("1373")
+            assert any("overallStatus=B" in url for url in observed_history_urls)
+
+            page.locator("#order-overall-status").select_option("")
+            page.locator("#order-filter-form").get_by_role("button", name="查询").click()
+            expect(page.locator("#order-list tbody tr")).to_have_count(2)
 
             page.get_by_role("button", name="下一页").click()
             expect(page.locator("#order-list tbody tr")).to_have_count(1)

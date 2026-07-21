@@ -240,6 +240,12 @@ function formatCurrencyTotals(totalsByCurrency) {
     : "SAP 未维护";
 }
 
+function formatCurrencyAverages(totalsByCurrency) {
+  return Array.isArray(totalsByCurrency) && totalsByCurrency.length
+    ? totalsByCurrency.map(({ currency, averageAmount }) => `${currency || "SAP 未维护"} ${Number(averageAmount).toFixed(2)}`).join(" · ")
+    : "SAP 未维护";
+}
+
 function formatMoney(currency, amount) {
   return amount === undefined || amount === null || amount === "" ? "SAP 未维护" : `${currency || "SAP 未维护"} ${Number(amount).toFixed(2)}`;
 }
@@ -251,18 +257,25 @@ function renderOrderRows(host, orders, emptyText, showDetail = false) {
     return;
   }
   const table = document.createElement("table");
-  table.innerHTML = `<thead><tr><th>订单号</th><th>日期</th><th>销售组织</th><th>状态</th><th>金额</th>${showDetail ? "<th>操作</th>" : ""}</tr></thead>`;
+  table.innerHTML = `<thead><tr><th>订单号</th><th>日期</th><th>订单类型</th><th>客户采购订单号</th><th>销售范围</th><th>整体状态</th><th>交货状态</th><th>开票状态</th><th>金额</th>${showDetail ? "<th>操作</th>" : ""}</tr></thead>`;
   const body = document.createElement("tbody");
   orders.forEach((order) => {
     const row = document.createElement("tr");
     row.append(
       element("td", "", unmaintained(order.salesOrder).replace(/^0+/, "") || unmaintained(order.salesOrder)),
       element("td", "", unmaintained(order.createdAt)),
-      element("td", "", unmaintained(order.salesOrganization)),
+      element("td", "", unmaintained(order.salesOrderType)),
+      element("td", "", unmaintained(order.purchaseOrderByCustomer)),
+      element("td", "", [order.salesOrganization, order.distributionChannel, order.division].every((value) => value !== undefined && value !== null && value !== "")
+        ? `${order.salesOrganization} / ${order.distributionChannel} / ${order.division}`
+        : "SAP 未维护"),
     );
-    const statusCell = element("td");
-    statusCell.append(statusBadge(order.overallStatus));
-    row.append(statusCell, element("td", "", formatMoney(order.currency, order.total)));
+    [order.overallStatus, order.deliveryStatus, order.billingStatus].forEach((status) => {
+      const statusCell = element("td");
+      statusCell.append(statusBadge(status));
+      row.append(statusCell);
+    });
+    row.append(element("td", "", formatMoney(order.currency, order.total)));
     if (showDetail) {
       const actionCell = element("td");
       const detail = element("button", "text-button", "查看明细");
@@ -277,14 +290,14 @@ function renderOrderRows(host, orders, emptyText, showDetail = false) {
   host.append(table);
 }
 
-function renderOrderDashboard(dashboard, pageItemCount) {
+function renderOrderDashboard(dashboard) {
   const summary = $("order-dashboard-summary");
   summary.replaceChildren();
   const cards = [
     ["订单总数", String(dashboard?.orderCount ?? 0)],
     ["订单金额", formatCurrencyTotals(dashboard?.totalsByCurrency)],
     ["履约处理中", String(dashboard?.inFulfillmentCount ?? 0)],
-    ["本页订单", String(pageItemCount)],
+    ["平均订单额", formatCurrencyAverages(dashboard?.totalsByCurrency)],
   ];
   cards.forEach(([label, value]) => {
     const card = element("article", "dashboard-card");
@@ -303,6 +316,17 @@ function renderOrderAnalytics(dashboard) {
   });
   if (!months.childElementCount) months.append(element("p", "empty-state", "SAP 未维护近 12 个月订单趋势。"));
   trend.append(months);
+
+  const distribution = $("order-status-distribution");
+  distribution.replaceChildren();
+  distribution.append(element("h3", "", "状态分布"));
+  const statuses = dashboard?.statuses || [];
+  if (!statuses.length) distribution.append(element("p", "empty-state", "SAP 未维护订单状态分布。"));
+  statuses.forEach(({ status, count }) => {
+    const row = element("p", "status-distribution-row");
+    row.append(statusBadge(status), element("span", "", `：${count ?? 0} 单`));
+    distribution.append(row);
+  });
 }
 
 function renderOrderInsights(insights) {
@@ -401,7 +425,7 @@ function renderOrderDetail(data) {
 
 function renderOrderWorkbench(data) {
   renderOrderFilterOptions(data);
-  renderOrderDashboard(data.dashboard, data.items.length);
+  renderOrderDashboard(data.dashboard);
   renderOrderAnalytics(data.dashboard);
   renderOrderInsights(data.insights);
   renderOrderRows($("sap-orders-list"), data.items, "未找到符合当前条件的 SAP 销售订单。", true);
