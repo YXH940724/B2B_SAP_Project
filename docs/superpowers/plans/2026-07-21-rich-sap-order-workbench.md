@@ -16,6 +16,7 @@
 - 订单详情必须在读取 SAP 抬头后复核 `SoldToParty`；不匹配时返回 404。
 - 生产环境保持 TLS 验证开启；测试环境例外必须显式配置。
 - 不输出 SAP 凭据、Cookie、完整 SAP 原始错误体或其他客户订单明细。
+- 金额只能在相同 `TransactionCurrency` 内聚合；不得跨币种相加或推断汇率。多币种结果必须渲染每个币种的金额，不能显示单一合计金额或币种。
 
 ---
 
@@ -77,18 +78,26 @@ export type OrderDetail = {
   items: Array<{ item: string; material: string | null; description: string | null; quantity: number; unit: string | null; netPrice: number | null; netAmount: number; currency: string | null; deliveryStatus: OrderStatus }>;
 };
 
-export type OrderDashboard = {
+export type CurrencyTotal = {
+  currency: string;
   orderCount: number;
   totalAmount: number;
   averageAmount: number;
-  currency: string;
+};
+
+export type OrderDashboard = {
+  orderCount: number;
+  totalsByCurrency: CurrencyTotal[];
+  totalAmount?: number;
+  averageAmount?: number;
+  currency?: string;
   inFulfillmentCount: number;
-  months: Array<{ month: string; orderCount: number; totalAmount: number }>;
+  months: Array<{ month: string; orderCount: number; totalsByCurrency: CurrencyTotal[]; totalAmount?: number; averageAmount?: number; currency?: string }>;
   statuses: Array<{ status: OrderStatus; count: number }>;
 };
 
 export type OrderInsights = {
-  topSalesOrganizations: Array<{ salesOrganization: string; orderCount: number; totalAmount: number; currency: string }>;
+  topSalesOrganizations: Array<{ salesOrganization: string; orderCount: number; totalsByCurrency: CurrencyTotal[]; totalAmount?: number; averageAmount?: number; currency?: string }>;
   largestOrder: OrderSummary | null;
   latestOrderDate: string;
   attentionCount: number;
@@ -123,6 +132,18 @@ test("filters only the logged-in customer's orders and paginates the mapped SAP 
 test("rejects an order detail whose SAP sold-to party differs from the session customer", async () => {
   const service = new OrderHistoryService(fakeForeignOrderDetail());
   await assert.rejects(() => service.detail("100001", "1372"), /订单不存在/);
+});
+
+test("keeps CNY and USD dashboard and sales-organization totals separate", async () => {
+  const service = new OrderHistoryService(fakeMixedCurrencyOrders(), () => new Date("2026-07-21T00:00:00.000Z"));
+  const result = await service.list("100001");
+  assert.deepEqual(result.dashboard.totalsByCurrency, [
+    { currency: "CNY", orderCount: 1, totalAmount: 100, averageAmount: 100 },
+    { currency: "USD", orderCount: 1, totalAmount: 25, averageAmount: 25 },
+  ]);
+  assert.equal(result.dashboard.totalAmount, undefined);
+  assert.equal(result.dashboard.currency, undefined);
+  assert.deepEqual(result.insights.topSalesOrganizations[0].totalsByCurrency, result.dashboard.totalsByCurrency);
 });
 ```
 
@@ -450,6 +471,18 @@ function renderOrderWorkbench(data) {
   renderOrderRows($("order-list"), data.items, "未找到符合当前条件的 SAP 销售订单。", true);
   renderOrderPagination(data);
 }
+
+function formatCurrencyTotals(totalsByCurrency) {
+  return totalsByCurrency.length
+    ? totalsByCurrency.map(({ currency, totalAmount }) => `${currency || "SAP 未维护"} ${Number(totalAmount).toFixed(2)}`).join(" · ")
+    : "SAP 未维护";
+}
+
+// Dashboard amount cards, monthly trend labels and sales-organization insight rows
+// must use `formatCurrencyTotals(value.totalsByCurrency)`.  `totalAmount`,
+// `averageAmount`, and `currency` are optional legacy conveniences and may be read
+// only when `totalsByCurrency.length === 1`; never use a fallback that combines
+// multiple currencies or fabricates an exchange rate.
 ```
 
 - [ ] **Step 5: Implement on-demand dialog loading without changing customer scope**

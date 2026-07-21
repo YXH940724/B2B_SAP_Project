@@ -33,18 +33,26 @@ export type OrderSummary = {
   billingStatus: OrderStatus;
 };
 
-export type OrderDashboard = {
+export type CurrencyTotal = {
+  currency: string;
   orderCount: number;
   totalAmount: number;
   averageAmount: number;
-  currency: string;
+};
+
+export type OrderDashboard = {
+  orderCount: number;
+  totalsByCurrency: CurrencyTotal[];
+  totalAmount?: number;
+  averageAmount?: number;
+  currency?: string;
   inFulfillmentCount: number;
-  months: Array<{ month: string; orderCount: number; totalAmount: number }>;
+  months: Array<{ month: string; orderCount: number; totalsByCurrency: CurrencyTotal[]; totalAmount?: number; averageAmount?: number; currency?: string }>;
   statuses: Array<{ status: OrderStatus; count: number }>;
 };
 
 export type OrderInsights = {
-  topSalesOrganizations: Array<{ salesOrganization: string; orderCount: number; totalAmount: number; currency: string }>;
+  topSalesOrganizations: Array<{ salesOrganization: string; orderCount: number; totalsByCurrency: CurrencyTotal[]; totalAmount?: number; averageAmount?: number; currency?: string }>;
   largestOrder: OrderSummary | null;
   latestOrderDate: string;
   attentionCount: number;
@@ -218,29 +226,44 @@ function sortOrders(orders: OrderSummary[], sort: OrderQuery["sort"]): OrderSumm
   return [...orders].sort((left, right) => value(left) < value(right) ? -multiplier : value(left) > value(right) ? multiplier : 0);
 }
 
+function totalsByCurrency(orders: OrderSummary[]): CurrencyTotal[] {
+  const totals = new Map<string, { orderCount: number; totalAmount: number }>();
+  orders.forEach((order) => {
+    const current = totals.get(order.currency) ?? { orderCount: 0, totalAmount: 0 };
+    current.orderCount += 1;
+    current.totalAmount += order.total;
+    totals.set(order.currency, current);
+  });
+  return [...totals.entries()]
+    .map(([currency, total]) => ({ currency, ...total, averageAmount: total.totalAmount / total.orderCount }))
+    .sort((left, right) => left.currency.localeCompare(right.currency));
+}
+
+function singleCurrencyConvenience(totals: CurrencyTotal[]): Pick<OrderDashboard, "totalAmount" | "averageAmount" | "currency"> {
+  if (totals.length !== 1) return {};
+  const [total] = totals;
+  return { totalAmount: total.totalAmount, averageAmount: total.averageAmount, currency: total.currency };
+}
+
 function dashboard(orders: OrderSummary[], now: Date): OrderDashboard {
-  const months = twelveMonths(now).map((month) => ({ month, orderCount: 0, totalAmount: 0 }));
-  const byMonth = new Map(months.map((month) => [month.month, month]));
+  const months = twelveMonths(now).map((month) => {
+    const monthOrders = orders.filter((order) => order.createdAt.slice(0, 7) === month);
+    const monthTotals = totalsByCurrency(monthOrders);
+    return { month, orderCount: monthOrders.length, totalsByCurrency: monthTotals, ...singleCurrencyConvenience(monthTotals) };
+  });
   const statuses = new Map<string, { status: OrderStatus; count: number }>();
-  let totalAmount = 0;
   let inFulfillmentCount = 0;
   orders.forEach((order) => {
-    totalAmount += order.total;
-    const month = byMonth.get(order.createdAt.slice(0, 7));
-    if (month) {
-      month.orderCount += 1;
-      month.totalAmount += order.total;
-    }
     const current = statuses.get(order.overallStatus.code);
     if (current) current.count += 1;
     else statuses.set(order.overallStatus.code, { status: order.overallStatus, count: 1 });
     if (order.deliveryStatus.code === "B") inFulfillmentCount += 1;
   });
+  const aggregateTotals = totalsByCurrency(orders);
   return {
     orderCount: orders.length,
-    totalAmount,
-    averageAmount: orders.length ? totalAmount / orders.length : 0,
-    currency: orders.find((order) => order.currency)?.currency || "",
+    totalsByCurrency: aggregateTotals,
+    ...singleCurrencyConvenience(aggregateTotals),
     inFulfillmentCount,
     months,
     statuses: [...statuses.values()].sort((left, right) => right.count - left.count || left.status.code.localeCompare(right.status.code)),
@@ -248,23 +271,25 @@ function dashboard(orders: OrderSummary[], now: Date): OrderDashboard {
 }
 
 function insights(orders: OrderSummary[]): OrderInsights {
-  const salesOrganizations = new Map<string, { salesOrganization: string; orderCount: number; totalAmount: number; currency: string }>();
+  const salesOrganizations = new Map<string, OrderSummary[]>();
   orders.forEach((order) => {
-    const current = salesOrganizations.get(order.salesOrganization);
-    if (current) {
-      current.orderCount += 1;
-      current.totalAmount += order.total;
-    } else {
-      salesOrganizations.set(order.salesOrganization, {
-        salesOrganization: order.salesOrganization,
-        orderCount: 1,
-        totalAmount: order.total,
-        currency: order.currency,
-      });
-    }
+    const current = salesOrganizations.get(order.salesOrganization) ?? [];
+    current.push(order);
+    salesOrganizations.set(order.salesOrganization, current);
   });
   return {
-    topSalesOrganizations: [...salesOrganizations.values()].sort((left, right) => right.totalAmount - left.totalAmount || left.salesOrganization.localeCompare(right.salesOrganization)).slice(0, 5),
+    topSalesOrganizations: [...salesOrganizations.entries()]
+      .map(([salesOrganization, organizationOrders]) => {
+        const organizationTotals = totalsByCurrency(organizationOrders);
+        return {
+          salesOrganization,
+          orderCount: organizationOrders.length,
+          totalsByCurrency: organizationTotals,
+          ...singleCurrencyConvenience(organizationTotals),
+        };
+      })
+      .sort((left, right) => right.orderCount - left.orderCount || left.salesOrganization.localeCompare(right.salesOrganization))
+      .slice(0, 5),
     largestOrder: orders.reduce<OrderSummary | null>((largest, order) => !largest || order.total > largest.total ? order : largest, null),
     latestOrderDate: orders.reduce((latest, order) => order.createdAt > latest ? order.createdAt : latest, ""),
     attentionCount: orders.filter((order) => order.overallStatus.code !== "C").length,

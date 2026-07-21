@@ -82,6 +82,27 @@ function fakeOrderDetailWithUnmaintainedOptionalFields() {
   };
 }
 
+function fakeMixedCurrencyOrders() {
+  return {
+    get: async () => ({
+      data: {
+        results: [
+          {
+            SalesOrder: "0000001372", SalesOrderType: "OR", CreationDate: "2026-07-01", SoldToParty: "0000100001",
+            SalesOrganization: "1310", DistributionChannel: "10", OrganizationDivision: "00", TotalNetAmount: "100", TransactionCurrency: "CNY",
+            OverallSDProcessStatus: "A", OverallDeliveryStatus: "A", OverallOrdReltdBillgStatus: "A",
+          },
+          {
+            SalesOrder: "0000001373", SalesOrderType: "OR", CreationDate: "2026-07-02", SoldToParty: "0000100001",
+            SalesOrganization: "1310", DistributionChannel: "10", OrganizationDivision: "00", TotalNetAmount: "25", TransactionCurrency: "USD",
+            OverallSDProcessStatus: "B", OverallDeliveryStatus: "B", OverallOrdReltdBillgStatus: "A",
+          },
+        ],
+      },
+    }),
+  };
+}
+
 test("filters only the logged-in customer's orders and paginates the mapped SAP rows", async () => {
   const client = fakeSapOrders();
   const service = new OrderHistoryService(client, () => new Date("2026-07-21T00:00:00.000Z"));
@@ -174,4 +195,29 @@ test("maps unmaintained optional SAP header and line fields to null", async () =
     currency: null,
     deliveryStatus: { code: "A", label: "未处理", tone: "neutral" },
   });
+});
+
+test("keeps CNY and USD dashboard and sales-organization totals separate", async () => {
+  const service = new OrderHistoryService(fakeMixedCurrencyOrders(), () => new Date("2026-07-21T00:00:00.000Z"));
+
+  const result = await service.list("100001");
+  const salesOrganization = result.insights.topSalesOrganizations[0];
+
+  assert.deepEqual(result.dashboard.totalsByCurrency, [
+    { currency: "CNY", orderCount: 1, totalAmount: 100, averageAmount: 100 },
+    { currency: "USD", orderCount: 1, totalAmount: 25, averageAmount: 25 },
+  ]);
+  assert.equal(result.dashboard.totalAmount, undefined);
+  assert.equal(result.dashboard.averageAmount, undefined);
+  assert.equal(result.dashboard.currency, undefined);
+  const july = result.dashboard.months.find((month) => month.month === "2026-07");
+  assert.deepEqual(july?.totalsByCurrency, result.dashboard.totalsByCurrency);
+  assert.equal(july?.totalAmount, undefined);
+  assert.equal(july?.currency, undefined);
+  assert.deepEqual(salesOrganization.totalsByCurrency, [
+    { currency: "CNY", orderCount: 1, totalAmount: 100, averageAmount: 100 },
+    { currency: "USD", orderCount: 1, totalAmount: 25, averageAmount: 25 },
+  ]);
+  assert.equal(salesOrganization.totalAmount, undefined);
+  assert.equal(salesOrganization.currency, undefined);
 });
