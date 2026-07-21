@@ -228,7 +228,10 @@ test("serves independent order-entry and customer-360 views", () => {
   assert.match(html, /id="customer-business-illustration"/);
   assert.match(html, /id="order-header-form"/);
   assert.match(html, /id="order-line-items"/);
+  assert.match(html, /id="order-entry-groups"/);
   assert.match(script, /function showView/);
+  assert.match(script, /function groupCartBySalesArea/);
+  assert.match(script, /function salesAreaLabel/);
   assert.match(script, /api\/customer-360/);
 });
 
@@ -248,6 +251,7 @@ test("serves the rich SAP order workbench controls", () => {
   for (const id of ["order-filter-form", "order-list", "order-pagination", "order-insights", "order-detail-dialog", "order-detail-lines"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  assert.match(html, /id="order-sales-area"/);
 });
 
 test("serves filter, pagination and detail renderers for the order workbench", () => {

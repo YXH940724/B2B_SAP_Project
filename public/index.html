@@ -86,7 +86,7 @@
           <label>期望交货日期<input id="requested-delivery-date" type="date"></label>
           <label>客户采购订单号 / 参考号<input id="purchase-order-by-customer" maxlength="35" placeholder="可选"></label>
           <label class="wide">订单备注<textarea id="portal-note" maxlength="500" placeholder="可选，最多 500 字"></textarea></label>
-          <div id="order-line-items" class="wide" aria-label="订单行项目"></div>
+          <div id="order-line-items" class="wide" aria-label="订单行项目"><div id="order-entry-groups"></div></div>
           <div class="checkout-actions"><button type="button" id="back-to-cart-button" class="text-button">返回购物车</button><button>查看订单摘要</button></div>
         </form>
       </section>
@@ -102,7 +102,7 @@
           <label>关键词<input id="order-query" type="search" placeholder="订单号或客户采购订单号" autocomplete="off"></label>
           <label>创建日期从<input id="order-from" type="date"></label>
           <label>创建日期至<input id="order-to" type="date"></label>
-          <label>销售组织<select id="order-sales-organization"><option value="">全部销售组织</option></select></label>
+          <label>销售范围<select id="order-sales-area"><option value="">全部销售范围</option></select></label>
           <label>整体状态<select id="order-overall-status"><option value="">全部整体状态</option></select></label>
           <label>交货状态<select id="order-delivery-status"><option value="">全部交货状态</option></select></label>
           <label>排序<select id="order-sort"><option value="createdAt:desc">最新创建</option><option value="total:desc">金额从高到低</option></select></label>
