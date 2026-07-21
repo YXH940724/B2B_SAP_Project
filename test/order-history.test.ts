@@ -40,6 +40,48 @@ function fakeForeignOrderDetail() {
   };
 }
 
+function fakeOrderDetailWithUnmaintainedOptionalFields() {
+  return {
+    get: async (path: string) => {
+      if (path === "/A_SalesOrder('0000001372')") {
+        return {
+          data: {
+            SalesOrder: "0000001372",
+            SalesOrderType: "OR",
+            CreationDate: "2026-07-01",
+            SoldToParty: "0000100001",
+            SalesOrganization: "1310",
+            DistributionChannel: "10",
+            OrganizationDivision: "00",
+            PurchaseOrderByCustomer: "  ",
+            TotalNetAmount: "100",
+            TransactionCurrency: "CNY",
+            RequestedDeliveryDate: " ",
+            CustomerPurchaseOrderDate: "\t",
+          },
+        };
+      }
+      assert.equal(path, "/A_SalesOrder('0000001372')/to_Item");
+      return {
+        data: {
+          results: [{
+            SalesOrderItem: "000010",
+            Material: "",
+            SalesOrderItemText: " ",
+            RequestedQuantity: "2",
+            RequestedQuantityUnit: "",
+            OrderQuantityUnit: "\t",
+            NetPriceAmount: " ",
+            NetAmount: "200",
+            TransactionCurrency: "",
+            OverallDeliveryStatus: "A",
+          }],
+        },
+      };
+    },
+  };
+}
+
 test("filters only the logged-in customer's orders and paginates the mapped SAP rows", async () => {
   const client = fakeSapOrders();
   const service = new OrderHistoryService(client, () => new Date("2026-07-21T00:00:00.000Z"));
@@ -109,5 +151,27 @@ test("sanitizes SAP read errors from list and detail operations", async () => {
     assert.equal((error as Error).message, "暂时无法读取订单数据，请稍后重试。");
     assert.doesNotMatch((error as Error).message, /SAP backend|0000100001|DENIED/);
     return true;
+  });
+});
+
+test("maps unmaintained optional SAP header and line fields to null", async () => {
+  const service = new OrderHistoryService(fakeOrderDetailWithUnmaintainedOptionalFields());
+
+  const detail = await service.detail("100001", "1372");
+
+  assert.equal(detail.header.purchaseOrderByCustomer, null);
+  assert.equal(detail.header.requestedDeliveryDate, null);
+  assert.equal(detail.header.customerPurchaseOrderDate, null);
+  assert.equal(detail.header.createdByUser, null);
+  assert.deepEqual(detail.items[0], {
+    item: "000010",
+    material: null,
+    description: null,
+    quantity: 2,
+    unit: null,
+    netPrice: null,
+    netAmount: 200,
+    currency: null,
+    deliveryStatus: { code: "A", label: "未处理", tone: "neutral" },
   });
 });

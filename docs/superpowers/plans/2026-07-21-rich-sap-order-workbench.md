@@ -54,7 +54,7 @@ export type OrderSummary = {
   salesOrganization: string;
   distributionChannel: string;
   division: string;
-  purchaseOrderByCustomer: string;
+  purchaseOrderByCustomer: string | null;
   total: number;
   currency: string;
   overallStatus: OrderStatus;
@@ -73,8 +73,8 @@ export type PaginatedOrderHistory = {
 };
 
 export type OrderDetail = {
-  header: OrderSummary & { requestedDeliveryDate: string; customerPurchaseOrderDate: string; createdByUser: string };
-  items: Array<{ item: string; material: string; description: string; quantity: number; unit: string; netPrice: number; netAmount: number; currency: string; deliveryStatus: OrderStatus }>;
+  header: OrderSummary & { requestedDeliveryDate: string | null; customerPurchaseOrderDate: string | null; createdByUser: string | null };
+  items: Array<{ item: string; material: string | null; description: string | null; quantity: number; unit: string | null; netPrice: number | null; netAmount: number; currency: string | null; deliveryStatus: OrderStatus }>;
 };
 
 export type OrderDashboard = {
@@ -146,6 +146,22 @@ function status(value: unknown): OrderStatus {
   return STATUS[code] ?? { code, label: code ? `SAP 状态 ${code}` : "SAP 未维护", tone: code ? "neutral" : "neutral" };
 }
 
+function optionalText(value: unknown): string | null {
+  const normalized = text(value);
+  return normalized || null;
+}
+
+function optionalAmount(value: unknown): number | null {
+  if (value === undefined || value === null || text(value) === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function optionalCreatedAt(value: unknown): string | null {
+  const normalized = createdAt(value);
+  return normalized || null;
+}
+
 function normalizeQuery(input: Partial<OrderQuery>): OrderQuery {
   const page = Number(input.page ?? 1);
   const pageSize = Number(input.pageSize ?? 20);
@@ -158,7 +174,7 @@ function toOrderSummary(row: Record<string, unknown>): OrderSummary {
   return {
     salesOrder: text(row.SalesOrder), salesOrderType: text(row.SalesOrderType), createdAt: createdAt(row.CreationDate),
     salesOrganization: text(row.SalesOrganization), distributionChannel: text(row.DistributionChannel), division: text(row.OrganizationDivision),
-    purchaseOrderByCustomer: text(row.PurchaseOrderByCustomer), total: amount(row.TotalNetAmount), currency: text(row.TransactionCurrency),
+    purchaseOrderByCustomer: optionalText(row.PurchaseOrderByCustomer), total: amount(row.TotalNetAmount), currency: text(row.TransactionCurrency),
     overallStatus: status(row.OverallSDProcessStatus), deliveryStatus: status(row.OverallDeliveryStatus), billingStatus: status(row.OverallOrdReltdBillgStatus),
   };
 }
@@ -166,7 +182,7 @@ function toOrderSummary(row: Record<string, unknown>): OrderSummary {
 function matchesTwelveMonthsAndQuery(order: OrderSummary, query: OrderQuery, now: Date): boolean {
   const start = twelveMonths(now)[0];
   const minimumDate = query.from || `${start}-01`;
-  const haystack = `${order.salesOrder} ${order.purchaseOrderByCustomer}`.toLowerCase();
+  const haystack = `${order.salesOrder} ${order.purchaseOrderByCustomer ?? ""}`.toLowerCase();
   return order.createdAt >= minimumDate && (!query.to || order.createdAt <= query.to)
     && (!query.salesOrganization || order.salesOrganization === query.salesOrganization)
     && (!query.overallStatus || order.overallStatus.code === query.overallStatus)
@@ -181,11 +197,11 @@ function sortOrders(orders: OrderSummary[], sort: OrderQuery["sort"]): OrderSumm
 }
 
 function toDetailHeader(row: Record<string, unknown>): OrderDetail["header"] {
-  return { ...toOrderSummary(row), requestedDeliveryDate: createdAt(row.RequestedDeliveryDate), customerPurchaseOrderDate: createdAt(row.CustomerPurchaseOrderDate), createdByUser: text(row.CreatedByUser) };
+  return { ...toOrderSummary(row), requestedDeliveryDate: optionalCreatedAt(row.RequestedDeliveryDate), customerPurchaseOrderDate: optionalCreatedAt(row.CustomerPurchaseOrderDate), createdByUser: optionalText(row.CreatedByUser) };
 }
 
 function toOrderLine(row: Record<string, unknown>): OrderDetail["items"][number] {
-  return { item: text(row.SalesOrderItem), material: text(row.Material), description: text(row.SalesOrderItemText), quantity: amount(row.RequestedQuantity), unit: text(row.RequestedQuantityUnit) || text(row.OrderQuantityUnit), netPrice: amount(row.NetPriceAmount), netAmount: amount(row.NetAmount), currency: text(row.TransactionCurrency), deliveryStatus: status(row.OverallDeliveryStatus) };
+  return { item: text(row.SalesOrderItem), material: optionalText(row.Material), description: optionalText(row.SalesOrderItemText), quantity: amount(row.RequestedQuantity), unit: optionalText(row.RequestedQuantityUnit) ?? optionalText(row.OrderQuantityUnit), netPrice: optionalAmount(row.NetPriceAmount), netAmount: amount(row.NetAmount), currency: optionalText(row.TransactionCurrency), deliveryStatus: status(row.OverallDeliveryStatus) };
 }
 ```
 
