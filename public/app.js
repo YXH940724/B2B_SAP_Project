@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const cart = [];
-const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material" };
+const catalogState = { page: 1, pageSize: 20, query: "", group: "", sort: "material", salesArea: null };
 let lastPreview = null;
 
 const authNote = (text) => { $("auth-message").textContent = text; };
@@ -44,6 +44,7 @@ function cartTotal() {
 function renderCustomer(profile) {
   const panel = $("customer-summary");
   panel.replaceChildren();
+  panel.append(element("div", "customer-avatar", "客户"));
   panel.append(element("p", "eyebrow", "客户信息"));
   panel.append(element("h2", "customer-name", profile.name));
   const fields = [["客户号", profile.customer], ["账户组", profile.accountGroup || "—"], ["业务伙伴", profile.businessPartner]];
@@ -54,7 +55,28 @@ function renderCustomer(profile) {
   });
   panel.append(element("hr"));
   panel.append(element("p", "eyebrow", "订购规则"));
-  panel.append(element("p", "sidebar-note", "仅展示 A305 / ZR01 当前有效价格物料。"));
+  panel.append(element("p", "sidebar-note", "仅展示 A305 / PR00 当前有效价格物料。"));
+}
+
+async function loadSalesAreas() {
+  const areas = await api("/api/sales-areas");
+  const select = $("sales-area-select");
+  select.replaceChildren();
+  if (!areas.length) throw new Error("当前客户未维护可用销售范围。");
+  areas.forEach((area) => {
+    const option = document.createElement("option");
+    option.value = area.key;
+    option.textContent = `${area.salesOrganization} / ${area.distributionChannel} / ${area.division}`;
+    option.dataset.salesOrganization = area.salesOrganization;
+    option.dataset.distributionChannel = area.distributionChannel;
+    option.dataset.division = area.division;
+    select.append(option);
+  });
+  const defaultArea = areas.find((area) => area.salesOrganization === "1310" && area.distributionChannel === "10")
+    || areas.find((area) => area.salesOrganization === "1310")
+    || areas[0];
+  select.value = defaultArea.key;
+  catalogState.salesArea = defaultArea;
 }
 
 function renderGroups(groups) {
@@ -151,9 +173,106 @@ function renderCart() {
   $("checkout-button").disabled = !cart.length;
 }
 
+function showView(name) {
+  const views = { catalog: "view-catalog", orderEntry: "view-order-entry", customer360: "view-customer-360", orders: "view-orders" };
+  Object.entries(views).forEach(([viewName, id]) => { $(id).hidden = viewName !== name; });
+}
+
+function renderOrderEntry() {
+  const host = $("order-line-items");
+  host.replaceChildren();
+  host.append(element("h3", "", "行项目"));
+  if (!cart.length) {
+    host.append(element("p", "empty-state", "购物车为空，请先选择商品。"));
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>物料</th><th>描述</th><th>数量</th><th>净价</th><th>小计</th></tr></thead>";
+  const body = document.createElement("tbody");
+  cart.forEach((item) => {
+    const row = document.createElement("tr");
+    const cells = [item.product.replace(/^0+/, "") || item.product, item.description, String(item.quantity), `${item.currency || ""} ${Number(item.unitPrice).toFixed(2)}`, `${item.currency || ""} ${(Number(item.unitPrice) * item.quantity).toFixed(2)}`];
+    cells.forEach((value) => row.append(element("td", "", value.trim())));
+    body.append(row);
+  });
+  table.append(body);
+  host.append(table, element("p", "order-total", `订单合计 ${cart[0]?.currency || "¥"}${cartTotal().toFixed(2)}`));
+}
+
+function appendCustomerGroup(host, title, values, formatter) {
+  const section = element("section", "customer-data-group");
+  section.append(element("h3", "", title));
+  if (!values.length) section.append(element("p", "", "SAP 未维护"));
+  values.forEach((value) => section.append(element("p", "", formatter(value))));
+  host.append(section);
+}
+
+function renderCustomer360(profile) {
+  const host = $("customer-360-content");
+  host.replaceChildren();
+  host.append(element("p", "customer-360-heading", `${profile.name} · 客户号 ${profile.customer} · BP ${profile.businessPartner}`));
+  appendCustomerGroup(host, "地址", profile.addresses, (item) => [item.street, item.city, item.postalCode, item.country].filter(Boolean).join("，"));
+  appendCustomerGroup(host, "联系方式", [...profile.phones, ...profile.emails], (item) => item);
+  appendCustomerGroup(host, "银行收款信息", profile.banks, (item) => [item.bankName, item.bankCountry, item.iban || item.account].filter(Boolean).join(" · "));
+  appendCustomerGroup(host, "销售范围", profile.salesAreas, (item) => `${item.salesOrganization} / ${item.distributionChannel} / ${item.division}`);
+}
+
+async function loadCustomer360() {
+  portalNote("正在加载客户 360 档案…");
+  try {
+    renderCustomer360(await api("/api/customer-360"));
+    portalNote("");
+  } catch (error) { portalNote(error.message); }
+}
+
+function renderOrderRows(host, orders, emptyText) {
+  host.replaceChildren();
+  if (!orders.length) {
+    host.append(element("p", "empty-state", emptyText));
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>订单号</th><th>日期</th><th>销售组织</th><th>状态</th><th>金额</th></tr></thead>";
+  const body = document.createElement("tbody");
+  orders.forEach((order) => {
+    const row = document.createElement("tr");
+    [order.salesOrder.replace(/^0+/, "") || order.salesOrder, order.createdAt || "—", order.salesOrganization || "—", order.status || "—", `${order.currency || ""} ${Number(order.total || 0).toFixed(2)}`.trim()].forEach((value) => row.append(element("td", "", value)));
+    body.append(row);
+  });
+  table.append(body);
+  host.append(table);
+}
+
+function renderOrderDashboard(history) {
+  const summary = $("order-dashboard-summary");
+  summary.replaceChildren();
+  const cards = [["订单总数", String(history.dashboard.orderCount)], ["订单金额", `${history.dashboard.currency || ""} ${Number(history.dashboard.totalAmount || 0).toFixed(2)}`.trim()], ["SAP 销售订单", String(history.sapOrders.length)]];
+  cards.forEach(([label, value]) => {
+    const card = element("article", "dashboard-card");
+    card.append(element("span", "", label), element("strong", "", value));
+    summary.append(card);
+  });
+  const monthly = element("div", "dashboard-months");
+  (history.dashboard.months || []).forEach((month) => monthly.append(element("span", "", `${month.month}: ${month.orderCount} 单`)));
+  summary.append(monthly);
+  renderOrderRows($("sap-orders-list"), history.sapOrders, "近 12 个月没有 SAP 销售订单。");
+}
+
+async function loadOrderCenter() {
+  portalNote("正在加载订单中心…");
+  try {
+    renderOrderDashboard(await api("/api/orders/history"));
+    portalNote("");
+  } catch (error) { portalNote(error.message); }
+}
+
 async function loadCatalog(next = {}) {
   Object.assign(catalogState, next);
   const params = new URLSearchParams({ page: String(catalogState.page), pageSize: String(catalogState.pageSize), sort: catalogState.sort });
+  if (!catalogState.salesArea) throw new Error("请选择销售范围后再加载商品目录。");
+  params.set("salesOrganization", catalogState.salesArea.salesOrganization);
+  params.set("distributionChannel", catalogState.salesArea.distributionChannel);
+  params.set("division", catalogState.salesArea.division);
   if (catalogState.query) params.set("query", catalogState.query);
   if (catalogState.group) params.set("group", catalogState.group);
   portalNote("正在加载商品目录…");
@@ -170,8 +289,9 @@ async function loadCatalog(next = {}) {
 
 async function openCheckout() {
   if (!cart.length) return;
-  $("checkout").hidden = false;
-  $("checkout").scrollIntoView({ behavior: "smooth", block: "start" });
+  renderOrderEntry();
+  showView("orderEntry");
+  $("view-order-entry").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function checkoutPayload() {
@@ -180,6 +300,9 @@ function checkoutPayload() {
     requestedDeliveryDate: $("requested-delivery-date").value,
     purchaseOrderByCustomer: $("purchase-order-by-customer").value,
     note: $("portal-note").value,
+    salesOrganization: catalogState.salesArea?.salesOrganization,
+    distributionChannel: catalogState.salesArea?.distributionChannel,
+    division: catalogState.salesArea?.division,
   };
 }
 
@@ -206,6 +329,8 @@ $("login-form").addEventListener("submit", async (event) => {
     $("auth").hidden = true;
     $("portal").hidden = false;
     renderCustomer(profile);
+    showView("catalog");
+    await loadSalesAreas();
     await loadCatalog();
   } catch (error) { authNote(error.message); } finally { setBusy(button, false, "登录中…"); }
 });
@@ -238,10 +363,15 @@ $("register-verify-form").addEventListener("submit", async (event) => {
 
 $("catalog-search-form").addEventListener("submit", (event) => { event.preventDefault(); loadCatalog({ query: $("catalog-search").value.trim(), page: 1 }); });
 $("catalog-sort").addEventListener("change", () => loadCatalog({ sort: $("catalog-sort").value, page: 1 }));
+$("sales-area-select").addEventListener("change", () => {
+  const option = $("sales-area-select").selectedOptions[0];
+  catalogState.salesArea = option ? { salesOrganization: option.dataset.salesOrganization, distributionChannel: option.dataset.distributionChannel, division: option.dataset.division, key: option.value } : null;
+  loadCatalog({ page: 1, group: "" });
+});
 $("checkout-button").addEventListener("click", openCheckout);
-$("back-to-cart-button").addEventListener("click", () => { $("checkout").hidden = true; $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
+$("back-to-cart-button").addEventListener("click", () => { showView("catalog"); $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
 
-$("checkout-form").addEventListener("submit", async (event) => {
+$("order-header-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
     lastPreview = await api("/api/orders/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(checkoutPayload()) });
@@ -261,7 +391,7 @@ $("confirm-order-button").addEventListener("click", async () => {
     portalNote(`SAP 订单创建成功：${data.salesOrder?.SalesOrder || "请查看 SAP 返回信息"}`);
     cart.length = 0;
     lastPreview = null;
-    $("checkout").hidden = true;
+    showView("catalog");
     renderCart();
   } catch (error) { portalNote(error.message); } finally { setBusy(button, false, "同步中…"); }
 });
@@ -271,10 +401,22 @@ $("logout").addEventListener("click", async () => {
   cart.length = 0;
   lastPreview = null;
   renderCart();
-  $("checkout").hidden = true;
+  showView("catalog");
   $("portal").hidden = true;
   $("auth").hidden = false;
   showAuth("login-panel");
+});
+
+$("nav-catalog").addEventListener("click", (event) => { event.preventDefault(); showView("catalog"); });
+$("nav-customer").addEventListener("click", async (event) => {
+  event.preventDefault();
+  showView("customer360");
+  await loadCustomer360();
+});
+$("nav-orders").addEventListener("click", async (event) => {
+  event.preventDefault();
+  showView("orders");
+  await loadOrderCenter();
 });
 
 renderCart();

@@ -7,16 +7,23 @@ import { loadConfig } from "./config.js";
 import { getCustomerPortalProfile, getCustomerRegistrationContact } from "./customer-contact.js";
 import { SapODataClient } from "./odata-client.js";
 import { createPortalApp } from "./portal-app.js";
+import { listCustomerSalesAreas } from "./sales-areas.js";
+import { getCustomer360 } from "./customer-360.js";
+import { OrderHistoryService } from "./order-history.js";
 import { createVerificationDelivery, type VerificationDelivery } from "./verification-delivery.js";
 
 export function createConfiguredPortalApp(config: ReturnType<typeof loadConfig>, client: SapODataClient, options: { auth?: AuthService; delivery?: VerificationDelivery; staticRoot?: string } = {}) {
+  const orderHistory = new OrderHistoryService(client);
   return createPortalApp({
     auth: options.auth ?? new AuthService(createAuthStore(process.env.PORTAL_DB_PATH ?? "data/portal.db")),
     contact: { get: (customer) => getCustomerRegistrationContact(client, config, customer) },
     delivery: options.delivery ?? createVerificationDelivery(process.env),
     order: { config, client },
     catalog: new CatalogService(client, config),
+    salesAreas: { list: (customer) => listCustomerSalesAreas(client, config, customer) },
     customer: { get: (customer) => getCustomerPortalProfile(client, config, customer) },
+    customer360: { get: (customer) => getCustomer360(client, config, customer) },
+    orderHistory,
     staticRoot: options.staticRoot,
   });
 }

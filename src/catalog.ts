@@ -1,21 +1,30 @@
 import type { SapConfig } from "./config.js";
-import { getProductDetails, type ProductDetails } from "./master-data.js";
+import { getProductDetails, normalizeCustomer, odataKey, type ProductDetails } from "./master-data.js";
 import { SapODataClient } from "./odata-client.js";
+import type { SalesArea } from "./sales-areas.js";
 
 type ODataResults<T> = { results?: T[] };
 
+const CATALOG_CONDITION_TYPE = "PR00";
+const CATALOG_SALES_ORGANIZATION = "1310";
+
 export interface PriceValidity {
+  Customer?: string;
+  SalesOrganization?: string;
+  DistributionChannel?: string;
   Material?: string;
   ConditionRecord?: string;
   ConditionValidityStartDate?: string;
   ConditionValidityEndDate?: string;
-  to_SlsPrcgConditionRecord?: {
-    ConditionTable?: string;
-    ConditionRateValue?: string;
-    ConditionRateValueUnit?: string;
-    ConditionQuantityUnit?: string;
-    ConditionIsDeleted?: boolean | string;
-  };
+}
+
+interface PriceConditionRecord {
+  ConditionRecord?: string;
+  ConditionTable?: string;
+  ConditionRateValue?: string;
+  ConditionRateValueUnit?: string;
+  ConditionQuantityUnit?: string;
+  ConditionIsDeleted?: boolean | string;
 }
 
 export interface CatalogItem {
@@ -67,8 +76,7 @@ function isDeleted(value: boolean | string | undefined): boolean {
   return value === true || value === "true" || value === "X";
 }
 
-export function currentA305Price(row: PriceValidity, now: Date): CurrentPrice | undefined {
-  const header = row.to_SlsPrcgConditionRecord;
+export function currentA305Price(row: PriceValidity, header: PriceConditionRecord | undefined, now: Date): CurrentPrice | undefined {
   const unitPrice = Number(header?.ConditionRateValue);
   const from = sapDate(row.ConditionValidityStartDate);
   const to = sapDate(row.ConditionValidityEndDate);
@@ -109,8 +117,8 @@ async function mapWithConcurrency<T, R>(values: T[], limit: number, mapper: (val
 export class CatalogService {
   constructor(private readonly client: SapODataClient, private readonly config: SapConfig, private readonly clock: () => Date = () => new Date()) {}
 
-  async list(query: CatalogQuery): Promise<CatalogPage> {
-    const prices = await this.listCurrentPrices();
+  async list(customerInput: string, salesArea: SalesArea, query: CatalogQuery): Promise<CatalogPage> {
+    const prices = await this.listCurrentPrices(normalizeCustomer(customerInput), pricingSalesArea(salesArea));
     const detailEntries = await mapWithConcurrency([...prices.values()], 8, async (price) => {
       try {
         return { price, detail: await getProductDetails(this.client, this.config, price.material) };
@@ -129,37 +137,75 @@ export class CatalogService {
     return { items: sorted.slice((page - 1) * query.pageSize, page * query.pageSize), groups, page, pageSize: query.pageSize, total, pageCount };
   }
 
-  async getOffer(product: string): Promise<CatalogItem> {
+  async getOffer(customerInput: string, salesArea: SalesArea, product: string): Promise<CatalogItem> {
+    const customer = normalizeCustomer(customerInput);
+    const pricingArea = pricingSalesArea(salesArea);
+    const records = await this.listA305Records();
     const response = await this.client.getAt<ODataResults<PriceValidity>>(this.config.services.pricing, "/A_SlsPrcgCndnRecdValidity", {
-      "$filter": `Material eq '${product.padStart(18, "0")}' and ConditionType eq 'ZR01'`,
-      "$expand": "to_SlsPrcgConditionRecord",
+      "$filter": priceFilter(customer, pricingArea, product.padStart(18, "0")),
       "$top": 20,
     });
-    const price = (response.data.results ?? []).map((row) => currentA305Price(row, this.clock())).filter((value): value is CurrentPrice => Boolean(value))
+    const price = (response.data.results ?? []).filter((row) => matchesScope(row, customer, pricingArea)).map((row) => currentA305Price(row, records.get(row.ConditionRecord ?? ""), this.clock())).filter((value): value is CurrentPrice => Boolean(value))
       .reduce<CurrentPrice | undefined>((selected, candidate) => preferPrice(selected, candidate), undefined);
     if (!price) throw new Error("This product has no current ZR01 price in condition table A305 and cannot be ordered.");
     return toCatalogItem(price, await getProductDetails(this.client, this.config, price.material));
   }
 
-  private async listCurrentPrices(): Promise<Map<string, CurrentPrice>> {
+  private async listCurrentPrices(customer: string, salesArea: SalesArea): Promise<Map<string, CurrentPrice>> {
     const prices = new Map<string, CurrentPrice>();
+    const records = await this.listA305Records();
     const now = this.clock();
     for (let offset = 0; ; offset += 200) {
       const response = await this.client.getAt<ODataResults<PriceValidity>>(this.config.services.pricing, "/A_SlsPrcgCndnRecdValidity", {
-        "$filter": "ConditionType eq 'ZR01'",
-        "$select": "Material,ConditionRecord,ConditionType,ConditionValidityStartDate,ConditionValidityEndDate",
-        "$expand": "to_SlsPrcgConditionRecord",
+        "$filter": priceFilter(customer, salesArea),
+        "$select": "Customer,SalesOrganization,DistributionChannel,Material,ConditionRecord,ConditionType,ConditionValidityStartDate,ConditionValidityEndDate",
         "$top": 200,
         "$skip": offset,
       });
       const rows = response.data.results ?? [];
       for (const row of rows) {
-        const candidate = currentA305Price(row, now);
+        const candidate = matchesScope(row, customer, salesArea) ? currentA305Price(row, records.get(row.ConditionRecord ?? ""), now) : undefined;
         if (candidate) prices.set(candidate.material, preferPrice(prices.get(candidate.material), candidate));
       }
       if (rows.length < 200) return prices;
     }
   }
+
+  private async listA305Records(): Promise<Map<string, PriceConditionRecord>> {
+    const records = new Map<string, PriceConditionRecord>();
+    for (let offset = 0; ; offset += 200) {
+      const response = await this.client.getAt<ODataResults<PriceConditionRecord>>(this.config.services.pricing, "/A_SlsPrcgConditionRecord", {
+        "$filter": `ConditionTable eq '305' and ConditionType eq '${CATALOG_CONDITION_TYPE}'`,
+        "$select": "ConditionRecord,ConditionTable,ConditionType,ConditionRateValue,ConditionRateValueUnit,ConditionQuantityUnit,ConditionIsDeleted",
+        "$top": 200,
+        "$skip": offset,
+      });
+      const rows = response.data.results ?? [];
+      for (const row of rows) if (row.ConditionRecord && row.ConditionTable === "305") records.set(row.ConditionRecord, row);
+      if (rows.length < 200) return records;
+    }
+  }
+}
+
+function priceFilter(customer: string, salesArea: SalesArea, material?: string): string {
+  const predicates = [
+    `ConditionType eq '${CATALOG_CONDITION_TYPE}'`,
+    `Customer eq '${odataKey(customer)}'`,
+    `SalesOrganization eq '${odataKey(salesArea.salesOrganization)}'`,
+    `DistributionChannel eq '${odataKey(salesArea.distributionChannel)}'`,
+  ];
+  if (material) predicates.push(`Material eq '${odataKey(material)}'`);
+  return predicates.join(" and ");
+}
+
+function matchesScope(row: PriceValidity, customer: string, salesArea: SalesArea): boolean {
+  return normalizeCustomer(row.Customer ?? "") === customer
+    && row.SalesOrganization === salesArea.salesOrganization
+    && row.DistributionChannel === salesArea.distributionChannel;
+}
+
+function pricingSalesArea(salesArea: SalesArea): SalesArea {
+  return { ...salesArea, salesOrganization: CATALOG_SALES_ORGANIZATION, key: `${CATALOG_SALES_ORGANIZATION}/${salesArea.distributionChannel}/${salesArea.division}` };
 }
 
 function toCatalogItem(price: CurrentPrice, detail: ProductDetails): CatalogItem {

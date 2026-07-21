@@ -25,11 +25,20 @@ function makeStorefrontApp(): { app: ReturnType<typeof createPortalApp>; getCode
     auth,
     contact: { get: async (customer: string) => ({ customer: customer.padStart(10, "0"), email: "buyer@example.test" }) },
     delivery: { send: async (_customer: string, sentCode: string) => { code = sentCode; } },
-    catalog: { list: async () => ({
+    salesAreas: { list: async () => [{ salesOrganization: "1000", distributionChannel: "10", division: "00", key: "1000/10/00" }] },
+    catalog: { list: async (customer: string, area: { key: string }) => {
+      assert.equal(customer, "0000100001");
+      assert.equal(area.key, "1000/10/00");
+      return {
       items: [{ product: "000000000000001386", description: "演示物料", productGroup: "FG", baseUnit: "PC", conditionRecord: "0000000123", unitPrice: "30.00", currency: "CNY", priceUnit: "PC" }],
       groups: [{ code: "FG", label: "FG", count: 1 }], page: 1, pageSize: 20, total: 1, pageCount: 1,
-    }) },
+      };
+    } },
     customer: { get: async () => ({ customer: "0000100001", name: "演示客户", accountGroup: "Z001", businessPartner: "0000000046" }) },
+    orderHistory: { list: async (customer: string) => ({
+      sapOrders: [{ salesOrder: "0000001372", createdAt: "2026-07-01", salesOrganization: "1310", total: 100, currency: "CNY", status: "A", source: "sap" }],
+      dashboard: { orderCount: customer === "0000100001" ? 1 : 0, totalAmount: 100, currency: "CNY", months: [] },
+    }) },
   });
   return { app, getCode: () => code };
 }
@@ -96,7 +105,9 @@ test("keeps authentication feedback outside the hidden order portal", () => {
 
 test("returns a session-protected, paginated catalog and customer summary", async () => {
   const agent = await registeredAgent(makeStorefrontApp);
-  const response = await agent.get("/api/catalog?query=1386&group=FG&page=1&pageSize=20&sort=material").expect(200);
+  const areas = await agent.get("/api/sales-areas").expect(200);
+  assert.equal(areas.body[0].key, "1000/10/00");
+  const response = await agent.get("/api/catalog?salesOrganization=1000&distributionChannel=10&division=00&query=1386&group=FG&page=1&pageSize=20&sort=material").expect(200);
   assert.equal(response.body.items[0].product, "000000000000001386");
   assert.equal(response.body.groups[0].code, "FG");
   assert.equal(response.body.page, 1);
@@ -107,8 +118,10 @@ test("returns a session-protected, paginated catalog and customer summary", asyn
 
 test("rejects catalog requests without a session and rejects invalid page size", async () => {
   await request(makeStorefrontApp().app).get("/api/catalog?pageSize=20").expect(401);
+  await request(makeStorefrontApp().app).get("/api/customer-360").expect(401);
   const agent = await registeredAgent(makeStorefrontApp);
-  await agent.get("/api/catalog?pageSize=51").expect(400);
+  await agent.get("/api/catalog?salesOrganization=1000&distributionChannel=10&division=00&pageSize=51").expect(400);
+  await agent.get("/api/catalog?salesOrganization=9999&distributionChannel=10&division=00").expect(400);
 });
 
 test("rejects an invalid checkout delivery date before SAP pricing", async () => {
@@ -119,8 +132,22 @@ test("rejects an invalid checkout delivery date before SAP pricing", async () =>
   assert.match(response.body.error, /期望交货日期/);
 });
 
+test("returns only SAP orders from the session-bound order history", async () => {
+  const agent = await registeredAgent(makeStorefrontApp);
+  const response = await agent.get("/api/orders/history").expect(200);
+  assert.equal(response.body.sapOrders[0].salesOrder, "0000001372");
+  assert.equal(response.body.portalOrders, undefined);
+  assert.equal(response.body.dashboard.totalAmount, 100);
+  await request(makeStorefrontApp().app).get("/api/orders/history").expect(401);
+});
+
 test("serves the storefront navigation, catalog controls, cart and checkout fields", () => {
   const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
+  assert.match(html, /id="sales-area-select"/);
+  assert.match(script, /api\/sales-areas/);
+  assert.match(script, /salesOrganization === "1310" && area\.distributionChannel === "10"/);
+  assert.match(script, /salesOrganization/);
   assert.match(html, /id="catalog-search"/);
   assert.match(html, /id="material-groups"/);
   assert.match(html, /id="catalog-grid"/);
@@ -129,6 +156,34 @@ test("serves the storefront navigation, catalog controls, cart and checkout fiel
   assert.match(html, /id="requested-delivery-date"/);
   assert.match(html, /id="purchase-order-by-customer"/);
   assert.match(html, /id="portal-note"/);
+});
+
+test("serves independent order-entry and customer-360 views", () => {
+  const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
+  assert.match(html, /id="view-order-entry"/);
+  assert.match(html, /id="view-customer-360"/);
+  assert.match(html, /id="customer-business-illustration"/);
+  assert.match(html, /id="order-header-form"/);
+  assert.match(html, /id="order-line-items"/);
+  assert.match(script, /function showView/);
+  assert.match(script, /api\/customer-360/);
+});
+
+test("serves an SAP-only order center", () => {
+  const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
+  assert.match(html, /id="view-orders"/);
+  assert.match(html, /id="order-dashboard-summary"/);
+  assert.match(html, /id="sap-orders-list"/);
+  assert.doesNotMatch(html, /id="portal-orders-list"/);
+  assert.match(script, /api\/orders\/history/);
+  assert.match(script, /function renderOrderDashboard/);
+});
+
+test("keeps inactive portal views visually hidden", () => {
+  const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/view-visibility.css"), "utf8");
+  assert.match(styles, /\[hidden\]\{display:none!important\}/);
 });
 
 test("keeps storefront informational feedback separate from authentication error styling", () => {
