@@ -12,6 +12,8 @@ export type OrderQuery = {
   from?: string;
   to?: string;
   salesOrganization?: string;
+  distributionChannel?: string;
+  division?: string;
   overallStatus?: string;
   deliveryStatus?: string;
   query?: string;
@@ -156,6 +158,8 @@ function normalizeQuery(input: Partial<OrderQuery>): OrderQuery {
     from: input.from,
     to: input.to,
     salesOrganization: input.salesOrganization,
+    distributionChannel: input.distributionChannel,
+    division: input.division,
     overallStatus: input.overallStatus,
     deliveryStatus: input.deliveryStatus,
     query: input.query?.trim(),
@@ -218,6 +222,8 @@ function matchesTwelveMonthsAndQuery(order: OrderSummary, query: OrderQuery, now
   const haystack = `${order.salesOrder} ${order.purchaseOrderByCustomer ?? ""}`.toLowerCase();
   return order.createdAt >= minimumDate && (!query.to || order.createdAt <= query.to)
     && (!query.salesOrganization || order.salesOrganization === query.salesOrganization)
+    && (!query.distributionChannel || order.distributionChannel === query.distributionChannel)
+    && (!query.division || order.division === query.division)
     && (!query.overallStatus || order.overallStatus.code === query.overallStatus)
     && (!query.deliveryStatus || order.deliveryStatus.code === query.deliveryStatus)
     && (!query.query || haystack.includes(query.query.toLowerCase()));

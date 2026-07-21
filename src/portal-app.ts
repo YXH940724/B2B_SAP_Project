@@ -92,6 +92,8 @@ function orderHistoryQuery(req: express.Request): Partial<OrderQuery> {
     from: stringQuery(req.query.from),
     to: stringQuery(req.query.to),
     salesOrganization: stringQuery(req.query.salesOrganization),
+    distributionChannel: stringQuery(req.query.distributionChannel),
+    division: stringQuery(req.query.division),
     overallStatus: stringQuery(req.query.overallStatus),
     deliveryStatus: stringQuery(req.query.deliveryStatus),
     query: stringQuery(req.query.query),

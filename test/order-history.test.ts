@@ -119,6 +119,20 @@ test("filters only the logged-in customer's orders and paginates the mapped SAP 
   assert.equal(result.insights.topSalesOrganizations[0].salesOrganization, "1310");
 });
 
+test("filters current customer orders by the complete sales area", async () => {
+  const service = new OrderHistoryService(fakeSapOrders(), () => new Date("2026-07-21T00:00:00.000Z"));
+
+  const matching = await service.list("100001", {
+    page: 1, pageSize: 20, salesOrganization: "1310", distributionChannel: "10", division: "00", sort: "createdAt:desc",
+  });
+  const otherChannel = await service.list("100001", {
+    page: 1, pageSize: 20, salesOrganization: "1310", distributionChannel: "20", division: "00", sort: "createdAt:desc",
+  });
+
+  assert.equal(matching.total, 11);
+  assert.equal(otherChannel.total, 0);
+});
+
 test("rejects an order detail whose SAP sold-to party differs from the session customer", async () => {
   const service = new OrderHistoryService(fakeForeignOrderDetail());
 
