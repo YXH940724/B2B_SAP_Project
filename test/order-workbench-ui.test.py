@@ -114,7 +114,7 @@ def run() -> None:
         elif path == "/api/catalog":
             fulfill_json(route, {"items": [{"product": "000000000000001386", "description": "模拟可销物料", "descriptionLanguage": "ZH", "descriptionFallback": False, "productGroup": "FG", "baseUnit": "PC", "conditionRecord": "0000000123", "unitPrice": "30", "currency": "CNY", "priceUnit": "PC"}], "groups": [{"code": "FG", "label": "FG", "count": 1}], "page": 1, "pageSize": 20, "total": 1, "pageCount": 1})
         elif path == "/api/order-defaults":
-            fulfill_json(route, {"paymentTerms": "0001", "incotermsClassification": "FOB", "incotermsVersion": "2020", "incotermsLocation": "上海"})
+            fulfill_json(route, {"paymentTerms": "0001", "incotermsClassification": "FOB", "incotermsLocation": "上海"})
         elif path == "/api/products/000000000000001386/fulfillment":
             fulfill_json(route, {"product": "000000000000001386", "defaultPlant": "1310", "plants": ["1310"], "storageLocationsByPlant": {"1310": ["0001", "0002"]}})
         elif path == "/api/orders/history":
@@ -150,11 +150,15 @@ def run() -> None:
             page.locator("#view-order-entry").wait_for(state="visible")
             expect(page.locator("#customer-payment-terms")).to_have_value("0001")
             expect(page.locator("#incoterms-classification")).to_have_value("FOB")
-            expect(page.locator("#incoterms-version")).to_have_value("2020")
+            expect(page.locator("#incoterms-version")).to_have_count(0)
             expect(page.locator("#order-entry-groups thead")).to_contain_text("客户料号")
             expect(page.locator("#order-entry-groups thead")).to_contain_text("工厂")
             expect(page.locator("#order-entry-groups thead")).to_contain_text("税务预览")
             expect(page.locator("#order-entry-groups select").first).to_have_value("1310")
+            page.get_by_role("button", name="返回购物车").click()
+            page.locator("#customer-payment-terms").fill("9999")
+            page.get_by_role("button", name="去结算").click()
+            expect(page.locator("#customer-payment-terms")).to_have_value("0001")
             page.get_by_role("button", name="返回购物车").click()
 
             page.get_by_role("link", name="订单中心").click()

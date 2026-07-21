@@ -291,9 +291,10 @@ test("serves the rich SAP order workbench controls", () => {
 test("serves localized catalog controls, structured fulfillment fields, and a printable order detail", () => {
   const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
-  for (const id of ["catalog-language", "customer-payment-terms", "incoterms-classification", "incoterms-version", "incoterms-location", "print-order-detail", "print-preview"]) {
+  for (const id of ["catalog-language", "customer-payment-terms", "incoterms-classification", "incoterms-location", "print-order-detail", "print-preview"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  assert.doesNotMatch(html, /id="incoterms-version"/);
   for (const name of ["function loadOrderDefaults", "function loadFulfillmentOptions", "function renderPrintPreview", "window.print()"])
     assert.match(script, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });

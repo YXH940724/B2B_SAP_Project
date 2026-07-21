@@ -262,15 +262,17 @@ async function renderOrderEntry() {
   }
   const groups = groupCartBySalesArea();
   host.append(element("p", "empty-state", "正在读取 SAP 客户条款与物料履约主数据…"));
+  $("customer-payment-terms").value = "";
+  $("incoterms-classification").value = "";
+  $("incoterms-location").value = "";
   try {
     const defaults = await Promise.all(groups.map((group) => loadOrderDefaults(group)));
     const allItems = groups.flatMap((group) => group.items);
     await Promise.all(allItems.map((item) => loadFulfillmentOptions(item)));
     const first = defaults[0] || {};
-    if (!$("customer-payment-terms").value) $("customer-payment-terms").value = first.paymentTerms || "";
-    if (!$("incoterms-classification").value) $("incoterms-classification").value = first.incotermsClassification || "";
-    if (!$("incoterms-version").value) $("incoterms-version").value = first.incotermsVersion || "";
-    if (!$("incoterms-location").value) $("incoterms-location").value = first.incotermsLocation || "";
+    $("customer-payment-terms").value = first.paymentTerms || "";
+    $("incoterms-classification").value = first.incotermsClassification || "";
+    $("incoterms-location").value = first.incotermsLocation || "";
   } catch (error) {
     portalNote(`订单主数据读取失败：${error.message}`);
   }
@@ -648,7 +650,6 @@ function checkoutPayload() {
     note: $("portal-note").value,
     customerPaymentTerms: $("customer-payment-terms").value,
     incotermsClassification: $("incoterms-classification").value,
-    incotermsVersion: $("incoterms-version").value,
     incotermsLocation: $("incoterms-location").value,
   };
 }
