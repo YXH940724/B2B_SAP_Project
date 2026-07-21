@@ -53,3 +53,15 @@ test("recovers a lost create response by finding the child ID in SAP before retr
   assert.equal(store.getMallOrderChild("MALL-20260721-ABCDEF12-01")?.sapSalesOrder, "0000001394");
   store.close();
 });
+
+test("recognizes the OData results envelope returned by the SAP client", async () => {
+  const store = createAuthStore(":memory:");
+  const service = new MallOrderSubmissionService(store, {
+    get: async () => ({ data: { results: [{ SalesOrder: "0000001394" }] } }),
+    write: async () => { throw new Error("POST must not run"); },
+  } as never, () => 3);
+
+  const result = await service.submit(submission());
+  assert.equal(result.groups[0].salesOrder, "0000001394");
+  store.close();
+});

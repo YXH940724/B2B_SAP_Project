@@ -172,6 +172,18 @@ test("filters current customer orders by the complete sales area", async () => {
   assert.equal(otherChannel.total, 0);
 });
 
+test("maps marketplace child ID from SAP and accepts it as an order search keyword", async () => {
+  const service = new OrderHistoryService({
+    get: async () => ({ data: { results: [{
+      SalesOrder: "0000001394", SoldToParty: "0000100001", PurchaseOrderByShipToParty: "MALL-20260721-ABCDEF12-01",
+      CreationDate: "2026-07-21", TotalNetAmount: "1", TransactionCurrency: "CNY",
+    }] } }),
+  }, () => new Date("2026-07-21T00:00:00.000Z"));
+  const data = await service.list("100001", { query: "MALL-20260721-ABCDEF12-01" });
+  assert.equal(data.total, 1);
+  assert.equal(data.items[0].mallOrderChildId, "MALL-20260721-ABCDEF12-01");
+});
+
 test("rejects an order detail whose SAP sold-to party differs from the session customer", async () => {
   const service = new OrderHistoryService(fakeForeignOrderDetail());
 

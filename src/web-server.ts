@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AuthService } from "./auth-service.js";
 import { createAuthStore } from "./auth-store.js";
+import { MallOrderSubmissionService } from "./mall-orders.js";
 import { CatalogService } from "./catalog.js";
 import { loadConfig } from "./config.js";
 import { getCustomerPortalProfile, getCustomerRegistrationContact } from "./customer-contact.js";
@@ -15,12 +16,14 @@ import { OrderHistoryService } from "./order-history.js";
 import { createVerificationDelivery, type VerificationDelivery } from "./verification-delivery.js";
 
 export function createConfiguredPortalApp(config: ReturnType<typeof loadConfig>, client: SapODataClient, options: { auth?: AuthService; delivery?: VerificationDelivery; staticRoot?: string } = {}) {
+  const store = createAuthStore(process.env.PORTAL_DB_PATH ?? "data/portal.db");
   const orderHistory = new OrderHistoryService(client);
   return createPortalApp({
-    auth: options.auth ?? new AuthService(createAuthStore(process.env.PORTAL_DB_PATH ?? "data/portal.db")),
+    auth: options.auth ?? new AuthService(store),
     contact: { get: (customer) => getCustomerRegistrationContact(client, config, customer) },
     delivery: options.delivery ?? createVerificationDelivery(process.env),
     order: { config, client },
+    mallOrders: new MallOrderSubmissionService(store, client),
     catalog: new CatalogService(client, config),
     orderDefaults: { get: (customer, salesArea) => getOrderDefaults(client, config, customer, salesArea) },
     fulfillment: { get: (product) => getProductFulfillmentOptions(client, config, product) },

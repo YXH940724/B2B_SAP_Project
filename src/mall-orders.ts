@@ -43,7 +43,7 @@ export function generateMallOrderId(now = new Date(), randomBytes: Buffer<ArrayB
   return `MALL-${date}-${randomBytes.toString("hex").toUpperCase()}`;
 }
 
-export function buildMallOrderChildren(parentId: string, groups: MallOrderGroupInput[]): MallOrderChildPlan[] {
+export function buildMallOrderChildren<T extends { salesArea: SalesArea }>(parentId: string, groups: T[]): Array<{ id: string; group: T }> {
   return [...groups]
     .sort((left, right) => left.salesArea.key.localeCompare(right.salesArea.key))
     .map((group, index) => ({ id: `${parentId}-${String(index + 1).padStart(2, "0")}`, group }));
@@ -67,7 +67,7 @@ export class MallOrderSubmissionService {
     private readonly randomBytes: () => Buffer = () => crypto.randomBytes(4),
   ) {}
 
-  prepare(customer: string, groups: MallOrderGroupInput[]): MallOrderPreview {
+  prepare(customer: string, groups: Array<{ salesArea: SalesArea }>): MallOrderPreview {
     if (!groups.length) throw new Error("请至少选择一个销售范围。");
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const mallOrderId = generateMallOrderId(new Date(this.now()), this.randomBytes());

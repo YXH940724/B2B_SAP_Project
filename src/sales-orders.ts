@@ -93,9 +93,10 @@ export async function findSalesOrderByShipToParty(client: SapODataClient, custom
   });
   const data = response.data as {
     d?: { results?: Array<{ SalesOrder?: unknown }> };
+    results?: Array<{ SalesOrder?: unknown }>;
     value?: Array<{ SalesOrder?: unknown }>;
   };
-  const salesOrder = data.d?.results?.[0]?.SalesOrder ?? data.value?.[0]?.SalesOrder;
+  const salesOrder = data.d?.results?.[0]?.SalesOrder ?? data.results?.[0]?.SalesOrder ?? data.value?.[0]?.SalesOrder;
   return typeof salesOrder === "string" && salesOrder ? salesOrder : undefined;
 }
 
@@ -110,7 +111,7 @@ export function assertWriteAllowed(config: SapConfig, confirm: string | undefine
 
 export async function getSalesOrder(client: SapODataClient, id: string): Promise<{ order: unknown; etag?: string }> {
   const response = await client.get<unknown>(salesOrderPath(id), {
-    "$select": "SalesOrder,SalesOrderType,SalesOrganization,SoldToParty,PurchaseOrderByCustomer,SalesOrderDate,TotalNetAmount,TransactionCurrency,OverallSDProcessStatus,OverallDeliveryStatus,OverallOrdReltdBillgStatus",
+    "$select": "SalesOrder,SalesOrderType,SalesOrganization,SoldToParty,PurchaseOrderByCustomer,PurchaseOrderByShipToParty,SalesOrderDate,TotalNetAmount,TransactionCurrency,OverallSDProcessStatus,OverallDeliveryStatus,OverallOrdReltdBillgStatus",
   });
   return { order: response.data, etag: response.etag };
 }

@@ -28,6 +28,7 @@ export type OrderSummary = {
   distributionChannel: string;
   division: string;
   purchaseOrderByCustomer: string | null;
+  mallOrderChildId: string | null;
   total: number;
   currency: string;
   overallStatus: OrderStatus;
@@ -232,6 +233,7 @@ function toOrderSummary(row: Record<string, unknown>): OrderSummary {
     distributionChannel: text(row.DistributionChannel),
     division: text(row.OrganizationDivision),
     purchaseOrderByCustomer: optionalText(row.PurchaseOrderByCustomer),
+    mallOrderChildId: optionalText(row.PurchaseOrderByShipToParty),
     total: amount(row.TotalNetAmount),
     currency: text(row.TransactionCurrency),
     overallStatus: status(row.OverallSDProcessStatus),
@@ -243,7 +245,7 @@ function toOrderSummary(row: Record<string, unknown>): OrderSummary {
 function matchesTwelveMonthsAndQuery(order: OrderSummary, query: OrderQuery, now: Date): boolean {
   const start = twelveMonths(now)[0];
   const minimumDate = query.from || `${start}-01`;
-  const haystack = `${order.salesOrder} ${order.purchaseOrderByCustomer ?? ""}`.toLowerCase();
+  const haystack = `${order.salesOrder} ${order.purchaseOrderByCustomer ?? ""} ${order.mallOrderChildId ?? ""}`.toLowerCase();
   return order.createdAt >= minimumDate && (!query.to || order.createdAt <= query.to)
     && (!query.salesOrganization || order.salesOrganization === query.salesOrganization)
     && (!query.distributionChannel || order.distributionChannel === query.distributionChannel)
@@ -403,6 +405,7 @@ export class OrderHistoryService {
     const customer = normalizeCustomer(customerInput);
     const query = normalizeQuery(input);
     const response = await readOrderData(() => this.client.get<unknown>("/A_SalesOrder", {
+      "$select": "SalesOrder,SalesOrderType,SalesOrganization,DistributionChannel,OrganizationDivision,SoldToParty,PurchaseOrderByCustomer,PurchaseOrderByShipToParty,CreationDate,TotalNetAmount,TransactionCurrency,OverallSDProcessStatus,OverallDeliveryStatus,OverallOrdReltdBillgStatus",
       "$filter": `SoldToParty eq '${customer}'`,
       "$orderby": "CreationDate desc",
       "$top": 200,

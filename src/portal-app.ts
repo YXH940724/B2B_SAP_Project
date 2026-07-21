@@ -6,7 +6,8 @@ import type { SapConfig } from "./config.js";
 import { normalizeCustomer, type ProductFulfillmentOptions } from "./master-data.js";
 import { SapODataClient } from "./odata-client.js";
 import { getSellableOffer } from "./portal.js";
-import { assertWriteAllowed, createPayload, PortalCheckoutSchema } from "./sales-orders.js";
+import { assertWriteAllowed, PortalCheckoutSchema } from "./sales-orders.js";
+import type { MallOrderSubmissionInput, MallOrderSubmissionResult, MallOrderPreview } from "./mall-orders.js";
 import type { SalesArea } from "./sales-areas.js";
 import type { Customer360Profile } from "./customer-360.js";
 import { OrderHistoryError, type CustomerOrderHistory, type OrderDetail, type OrderQuery } from "./order-history.js";
@@ -18,6 +19,10 @@ export interface PortalDependencies {
   contact: { get(customer: string): Promise<{ customer: string; email: string }> };
   delivery: VerificationDelivery;
   order?: { config: SapConfig; client: SapODataClient };
+  mallOrders?: {
+    prepare(customer: string, groups: PortalCartGroup[]): MallOrderPreview;
+    submit(input: MallOrderSubmissionInput): Promise<MallOrderSubmissionResult>;
+  };
   catalog?: { list(customer: string, salesArea: SalesArea, query: CatalogQuery, language?: string): Promise<CatalogPage> };
   orderDefaults?: { get(customer: string, salesArea: SalesArea): Promise<OrderDefaults> };
   fulfillment?: { get(product: string): Promise<ProductFulfillmentOptions> };
@@ -197,6 +202,11 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     return deps.order;
   }
 
+  function mallOrderDependencies(): NonNullable<PortalDependencies["mallOrders"]> {
+    if (!deps.mallOrders) throw new Error("商城订单服务尚未配置。");
+    return deps.mallOrders;
+  }
+
   function catalogDependencies(): NonNullable<PortalDependencies["catalog"]> {
     if (!deps.catalog) throw new Error("商品目录服务尚未配置。");
     return deps.catalog;
@@ -373,8 +383,11 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     try {
       const active = session(req);
       const checkout = checkoutFields(req.body);
-      const groups = await Promise.all((await selectedCartGroups(active.customer, req.body)).map((group) => priceOrderGroup(active.customer, group)));
-      res.json({ groups, checkout });
+      const cartGroups = await selectedCartGroups(active.customer, req.body);
+      const preview = await Promise.all(cartGroups.map((group) => priceOrderGroup(active.customer, group)));
+      const prepared = mallOrderDependencies().prepare(active.customer, cartGroups);
+      const childIds = new Map(prepared.groups.map((group) => [group.salesArea.key, group.childOrderId]));
+      res.json({ mallOrderId: prepared.mallOrderId, groups: preview.map((group) => ({ ...group, childOrderId: childIds.get(group.salesArea.key) })), checkout });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }
   });
 
@@ -382,13 +395,16 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
     try {
       const { customer } = session(req);
       const checkout = checkoutFields(req.body);
-      const { client, config } = orderDependencies();
+      const { config } = orderDependencies();
       if (req.body?.confirm !== true) throw new Error("请确认订单后再同步 SAP。");
+      const mallOrderId = optionalText(req.body?.mallOrderId);
+      if (!mallOrderId || !/^MALL-\d{8}-[A-F0-9]{8}$/.test(mallOrderId)) throw new Error("商城订单号无效，请重新确认订单。");
       assertWriteAllowed(config, "CREATE_SALES_ORDER", "CREATE_SALES_ORDER");
-      const results = await Promise.all((await selectedCartGroups(customer, req.body)).map(async (group) => {
-        try {
-          const preview = await priceOrderGroup(customer, group);
-          const payload = createPayload({
+      const groups = await Promise.all((await selectedCartGroups(customer, req.body)).map(async (group) => {
+        const preview = await priceOrderGroup(customer, group);
+        return {
+          salesArea: group.salesArea,
+          payload: {
             sales_order_type: process.env.PORTAL_SALES_ORDER_TYPE ?? "OR",
             sales_organization: group.salesArea.salesOrganization,
             distribution_channel: group.salesArea.distributionChannel,
@@ -408,20 +424,18 @@ export function createPortalApp(deps: PortalDependencies): express.Express {
               };
             }),
             dry_run: false,
-            confirm: "CREATE_SALES_ORDER",
-            response_format: "json",
-          });
-          const created = await client.write<unknown>("post", "/A_SalesOrder", payload);
-          return { salesArea: group.salesArea, success: true, salesOrder: created.data };
-        } catch (error) {
-          return { salesArea: group.salesArea, success: false, error: error instanceof Error ? error.message : "请求失败。" };
-        }
+            confirm: "CREATE_SALES_ORDER" as const,
+            response_format: "json" as const,
+          },
+        };
       }));
+      const submitted = await mallOrderDependencies().submit({ mallOrderId, customer, groups });
+      const results = submitted.groups.map((group) => ({ ...group, success: group.status === "SUBMITTED" }));
       if (!results.some((result) => result.success)) {
-        res.status(400).json({ success: false, groups: results });
+        res.status(400).json({ success: false, mallOrderId: submitted.mallOrderId, groups: results });
         return;
       }
-      res.json({ success: true, groups: results });
+      res.json({ success: true, mallOrderId: submitted.mallOrderId, groups: results });
     } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "请求失败。" }); }
   });
 
