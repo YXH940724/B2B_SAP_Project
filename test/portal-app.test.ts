@@ -145,6 +145,18 @@ test("serves the storefront navigation, catalog controls, cart and checkout fiel
   assert.match(html, /id="portal-note"/);
 });
 
+test("serves independent order-entry and customer-360 views", () => {
+  const html = fs.readFileSync(path.resolve(import.meta.dirname, "../public/index.html"), "utf8");
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../public/app.js"), "utf8");
+  assert.match(html, /id="view-order-entry"/);
+  assert.match(html, /id="view-customer-360"/);
+  assert.match(html, /id="customer-business-illustration"/);
+  assert.match(html, /id="order-header-form"/);
+  assert.match(html, /id="order-line-items"/);
+  assert.match(script, /function showView/);
+  assert.match(script, /api\/customer-360/);
+});
+
 test("keeps storefront informational feedback separate from authentication error styling", () => {
   const styles = fs.readFileSync(path.resolve(import.meta.dirname, "../public/styles.css"), "utf8");
   assert.match(styles, /#auth-message\{[^}]*color:#b42318/);

@@ -44,6 +44,7 @@ function cartTotal() {
 function renderCustomer(profile) {
   const panel = $("customer-summary");
   panel.replaceChildren();
+  panel.append(element("div", "customer-avatar", "客户"));
   panel.append(element("p", "eyebrow", "客户信息"));
   panel.append(element("h2", "customer-name", profile.name));
   const fields = [["客户号", profile.customer], ["账户组", profile.accountGroup || "—"], ["业务伙伴", profile.businessPartner]];
@@ -172,6 +173,58 @@ function renderCart() {
   $("checkout-button").disabled = !cart.length;
 }
 
+function showView(name) {
+  const views = { catalog: "view-catalog", orderEntry: "view-order-entry", customer360: "view-customer-360" };
+  Object.entries(views).forEach(([viewName, id]) => { $(id).hidden = viewName !== name; });
+}
+
+function renderOrderEntry() {
+  const host = $("order-line-items");
+  host.replaceChildren();
+  host.append(element("h3", "", "行项目"));
+  if (!cart.length) {
+    host.append(element("p", "empty-state", "购物车为空，请先选择商品。"));
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>物料</th><th>描述</th><th>数量</th><th>净价</th><th>小计</th></tr></thead>";
+  const body = document.createElement("tbody");
+  cart.forEach((item) => {
+    const row = document.createElement("tr");
+    const cells = [item.product.replace(/^0+/, "") || item.product, item.description, String(item.quantity), `${item.currency || ""} ${Number(item.unitPrice).toFixed(2)}`, `${item.currency || ""} ${(Number(item.unitPrice) * item.quantity).toFixed(2)}`];
+    cells.forEach((value) => row.append(element("td", "", value.trim())));
+    body.append(row);
+  });
+  table.append(body);
+  host.append(table, element("p", "order-total", `订单合计 ${cart[0]?.currency || "¥"}${cartTotal().toFixed(2)}`));
+}
+
+function appendCustomerGroup(host, title, values, formatter) {
+  const section = element("section", "customer-data-group");
+  section.append(element("h3", "", title));
+  if (!values.length) section.append(element("p", "", "SAP 未维护"));
+  values.forEach((value) => section.append(element("p", "", formatter(value))));
+  host.append(section);
+}
+
+function renderCustomer360(profile) {
+  const host = $("customer-360-content");
+  host.replaceChildren();
+  host.append(element("p", "customer-360-heading", `${profile.name} · 客户号 ${profile.customer} · BP ${profile.businessPartner}`));
+  appendCustomerGroup(host, "地址", profile.addresses, (item) => [item.street, item.city, item.postalCode, item.country].filter(Boolean).join("，"));
+  appendCustomerGroup(host, "联系方式", [...profile.phones, ...profile.emails], (item) => item);
+  appendCustomerGroup(host, "银行收款信息", profile.banks, (item) => [item.bankName, item.bankCountry, item.iban || item.account].filter(Boolean).join(" · "));
+  appendCustomerGroup(host, "销售范围", profile.salesAreas, (item) => `${item.salesOrganization} / ${item.distributionChannel} / ${item.division}`);
+}
+
+async function loadCustomer360() {
+  portalNote("正在加载客户 360 档案…");
+  try {
+    renderCustomer360(await api("/api/customer-360"));
+    portalNote("");
+  } catch (error) { portalNote(error.message); }
+}
+
 async function loadCatalog(next = {}) {
   Object.assign(catalogState, next);
   const params = new URLSearchParams({ page: String(catalogState.page), pageSize: String(catalogState.pageSize), sort: catalogState.sort });
@@ -195,8 +248,9 @@ async function loadCatalog(next = {}) {
 
 async function openCheckout() {
   if (!cart.length) return;
-  $("checkout").hidden = false;
-  $("checkout").scrollIntoView({ behavior: "smooth", block: "start" });
+  renderOrderEntry();
+  showView("orderEntry");
+  $("view-order-entry").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function checkoutPayload() {
@@ -234,6 +288,7 @@ $("login-form").addEventListener("submit", async (event) => {
     $("auth").hidden = true;
     $("portal").hidden = false;
     renderCustomer(profile);
+    showView("catalog");
     await loadSalesAreas();
     await loadCatalog();
   } catch (error) { authNote(error.message); } finally { setBusy(button, false, "登录中…"); }
@@ -273,9 +328,9 @@ $("sales-area-select").addEventListener("change", () => {
   loadCatalog({ page: 1, group: "" });
 });
 $("checkout-button").addEventListener("click", openCheckout);
-$("back-to-cart-button").addEventListener("click", () => { $("checkout").hidden = true; $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
+$("back-to-cart-button").addEventListener("click", () => { showView("catalog"); $("cart-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
 
-$("checkout-form").addEventListener("submit", async (event) => {
+$("order-header-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
     lastPreview = await api("/api/orders/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(checkoutPayload()) });
@@ -295,7 +350,7 @@ $("confirm-order-button").addEventListener("click", async () => {
     portalNote(`SAP 订单创建成功：${data.salesOrder?.SalesOrder || "请查看 SAP 返回信息"}`);
     cart.length = 0;
     lastPreview = null;
-    $("checkout").hidden = true;
+    showView("catalog");
     renderCart();
   } catch (error) { portalNote(error.message); } finally { setBusy(button, false, "同步中…"); }
 });
@@ -305,10 +360,21 @@ $("logout").addEventListener("click", async () => {
   cart.length = 0;
   lastPreview = null;
   renderCart();
-  $("checkout").hidden = true;
+  showView("catalog");
   $("portal").hidden = true;
   $("auth").hidden = false;
   showAuth("login-panel");
+});
+
+$("nav-catalog").addEventListener("click", (event) => { event.preventDefault(); showView("catalog"); });
+$("nav-customer").addEventListener("click", async (event) => {
+  event.preventDefault();
+  showView("customer360");
+  await loadCustomer360();
+});
+$("nav-orders").addEventListener("click", (event) => {
+  event.preventDefault();
+  portalNote("订单中心与订单分析将在下一阶段启用。");
 });
 
 renderCart();
