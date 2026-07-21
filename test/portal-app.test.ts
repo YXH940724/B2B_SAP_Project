@@ -6,7 +6,7 @@ import request from "supertest";
 import { AuthService } from "../src/auth-service.js";
 import { createAuthStore } from "../src/auth-store.js";
 import { OrderHistoryError } from "../src/order-history.js";
-import { createPortalApp } from "../src/portal-app.js";
+import { createPortalApp, groupPortalCartLines } from "../src/portal-app.js";
 
 function makeApp(): { app: ReturnType<typeof createPortalApp>; getCode: () => string } {
   let code = "";
@@ -93,6 +93,19 @@ test("does not create a cookie when a portal login password is incorrect", async
   assert.equal(response.status, 401);
   assert.match(response.body.error, /客户号或密码/);
   assert.equal(response.headers["set-cookie"], undefined);
+});
+
+test("groups cart lines by the complete sales area without clearing the cart", () => {
+  const groups = groupPortalCartLines([
+    { product: "1386", quantity: 2, salesOrganization: "1310", distributionChannel: "10", division: "00" },
+    { product: "1387", quantity: 1, salesOrganization: "2000", distributionChannel: "20", division: "00" },
+    { product: "1388", quantity: 3, salesOrganization: "1310", distributionChannel: "10", division: "00" },
+  ]);
+
+  assert.deepEqual(groups.map((group) => ({ key: group.salesArea.key, products: group.items.map((item) => item.product) })), [
+    { key: "1310/10/00", products: ["1386", "1388"] },
+    { key: "2000/20/00", products: ["1387"] },
+  ]);
 });
 
 test("registers with a code then creates a secure session on login", async () => {
