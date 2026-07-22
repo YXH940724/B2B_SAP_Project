@@ -1,4 +1,6 @@
-# SAP OData MCP Server
+# B2B SAP Project
+
+SAP S/4HANA OData MCP 服务与客户自助下单门户。
 
 面向 SAP S/4HANA OData 的 stdio MCP 服务，支持销售订单、物料主数据、客户主数据、销售价格条件的查询，以及受控的销售订单创建和更新。
 
