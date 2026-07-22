@@ -1,6 +1,7 @@
-# SAP 客户门户项目封版交接说明
+# B2B SAP Project 封版交接说明
 
 > 版本：2026-07-22  
+> 仓库：[YXH940724/B2B_SAP_Project](https://github.com/YXH940724/B2B_SAP_Project)
 > 基线：`main` 分支  
 > 适用对象：业务测试、实施顾问、运维与后续开发人员
 
