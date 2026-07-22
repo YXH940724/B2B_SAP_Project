@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Guarded MCP server for SAP S/4HANA OData sales orders",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YXH940724/B2B_SAP_Project.git"
+  },
+  "homepage": "https://github.com/YXH940724/B2B_SAP_Project#readme",
+  "bugs": {
+    "url": "https://github.com/YXH940724/B2B_SAP_Project/issues"
+  },
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
